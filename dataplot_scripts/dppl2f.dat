@@ -109,3 +109,12 @@ gsave    % SAVE INITIAL GRAPHICS STATE
 1.00000 1.00000 1.00000 setrgbcolor
     0     0 m
  6429     0 l
+ 6429  4929 l
+    0  4929 l
+    0     0 l
+closepath fill 0. 0. 0. setrgbcolor
+showpage
+grestore
+%%Trailer
+%%Pages:     1
+% END OF DATAPLOT POSTSCRIPT FILE

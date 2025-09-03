@@ -1,0 +1,16 @@
+name = "diffustion_sim"
+uuid = "2126ef2f-d9a9-4433-886f-edfe20191e2b"
+authors = ["jhm18 <jonathan.h.morgan@gmail.com>"]
+version = "0.1.0"
+
+[deps]
+CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
+DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
+RCall = "6f49c342-dc21-5d91-9882-a32aef131414"
+Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
+
+[compat]
+CSV = "0.10.15"
+DataFrames = "1.7.1"
+RCall = "0.14.9"
+Statistics = "1.11.1"
