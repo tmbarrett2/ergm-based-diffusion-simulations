@@ -8,6 +8,9 @@
     Pkg.activate("/workspace/ergm-based-diffusion-simulations/julia_env")
     Pkg.status()
 
+#   Setting the DISPLAY
+    ENV["DISPLAY"] = ":100"
+
 ################
 #   PACKAGES   #
 ################
@@ -142,8 +145,12 @@ using diffustion_sim
     results = sim_parm_space(-0.1, -1.5, -3.5, -0.5, 1.0, -0.1, 3, 5, 500)
     plot_parameter_space(results, edgemax=3)
 
-#   Small Refinements
-#   Fix Title Placement
-#   Address the lingering b_close error
-#   Add Dataplot Axis Formatting
-#   Use Palatino Linotype Font
+#   Load network from GraphML file
+	network_data = sim_prep("/workspace/data/sim_test_data/WeakCore1_3.2_2.graphml")
+	alst = network_data.alst
+	vlst = network_data.vlst
+	
+#   Check network structure
+	n_nodes = size(alst, 1)
+	max_degree = size(alst, 2) - 1
+	println("Network has $n_nodes nodes with max degree $max_degree")

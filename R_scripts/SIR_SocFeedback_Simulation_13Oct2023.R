@@ -6,14 +6,9 @@
   cat("\014")
   rm(list = ls(all.names = TRUE))
 
-  # Set Working Directory
-  if (paste(Sys.info()[[1]], collapse=" ") == "Darwin"){
-    setwd("/Users/tylerbarrett/Dropbox (Duke Bio_Ea)/Village_Simulations/villageData/village_networks_2023")
-    getwd()
-  }else{
-    setwd("/mnt/d/Dropbox/DNAC/IDEANet/Village_Simulations/villageData/village_networks_2023")
-    getwd()
-  }
+# Set Working Directory
+  setwd("/workspace/data/sim_test_data")
+  getwd()
 
 # Options
   options(stringsAsFactors = FALSE)
@@ -471,6 +466,14 @@ library(expm)
   
 # Read In Test Network
   test_net <- igraph::read_graph("WeakCore1_3.2_2.net", format = c("pajek"))
+  test_net
+# igraph::write_graph(test_net, file = "WeakCore1_3.2_2.graphml", format = "graphml")
+
+# Testing that graphml object was outputted correctly
+  test_net <- igraph::read_graph("WeakCore1_3.2_2.graphml", format = c("graphml"))
+  test_net
+  par(mar=(0,0,0,0))
+  plot(test_net)
   
 # Prep Data for Simulation
   sim_data <- sim_prep(test_net)

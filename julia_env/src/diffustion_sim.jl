@@ -4,6 +4,7 @@ module diffustion_sim
     using DataFrames
     using RCall
     using Statistics
+	using EzXML
    
 #   SUPPORT FUNCTIONS
 
@@ -132,7 +133,7 @@ module diffustion_sim
 			results.r_colors = r_colors
 		
 		#	Transfer data to R
-			@rput results edgemax b_int b_cxn_symp b_cxn_total b_cxn_peers display
+			@rput results edgemax b_int b_cxn_symp b_cxn_total b_cxn_peers b_close display
 		
 		#	Open graphics device if saving
 			if save_path !== nothing
@@ -141,127 +142,140 @@ module diffustion_sim
 				"""
 			elseif show_plot
 				R"""
-					#	Set DISPLAY
-						Sys.setenv(DISPLAY=display)
-						Sys.getenv("DISPLAY")      
+				#	Set DISPLAY
+					Sys.setenv(DISPLAY=display)
+					Sys.getenv("DISPLAY")      
 					
-					#	Creating X11 Window
-						X11(width=10, height=12)
+				#	Creating X11 Window
+					X11(type = "cairo", width=10, height=12)
 				"""
 			end
 		
 		#	Execute R plotting code
 			R"""
-			# Creating Layout
-			viz_matrix <- matrix(c(7,7,7,7,7,7,7,7,7,7,
-			                      1,1,1,2,2,2,3,3,3,8,
-			                      1,1,1,2,2,2,3,3,3,8,
-			                      1,1,1,2,2,2,3,3,3,8,
-			                      4,4,4,5,5,5,6,6,6,8,
-			                      4,4,4,5,5,5,6,6,6,8,
-			                      4,4,4,5,5,5,6,6,6,8,
-			                      9,9,9,9,9,9,9,9,9,9), 
-			                    ncol = 10, byrow = TRUE)
-			layout(viz_matrix)
-			
-			# Looping Over Visualization Matrix
-			for (issymptomatic in seq(0, 1, 1)) {
-				# Filter for current symptomatic status
-				r_panel_data <- results[results$issymptomatic == issymptomatic, ]
-				
-				for (edgwgt in seq(1, edgemax, 1)) {
-					# Isolating Cell Data
-					r_cell_data <- r_panel_data[r_panel_data$edgwgt == edgwgt, ]
-					
-					# Creating Base Plot
-					par(mar=c(3, 4, 2, 2))
-					plot(NA, type="n", 
-					     main = paste('edgwgt =', edgwgt), 
-					     xlab = "",
-					     ylab = "Probability of Interaction", 
-					     family = 'serif',
-					     xlim = c(0, 5), 
-					     ylim = c(0, 1), 
-					     bty = "n", 
-					     las = 1)
-					
-					# Adding Reference Lines
-					ref_lines <- seq(0, 1, 0.2)
-					for (ref_line in ref_lines) {
-						abline(h = ref_line, col = "gray60", lty = 3)
-					}
-					
-					# Plotting X-Axis Label
-					mtext(side = 1, text = 'Number of Ill Peers', 
-					      col = "black", line = 2, cex = 0.75, family = 'serif')
-					
-					# Plotting Lines for each ninf level
-					ninf_levels <- unique(r_cell_data$ninf)
-					for (ninf in ninf_levels) {
-						r_line_data <- r_cell_data[r_cell_data$ninf == ninf, ]
-						r_line_data <- r_line_data[order(r_line_data$peersinf), ]
-						lines(r_line_data$peersinf, r_line_data$prob_act, 
-						      lty = 1, col = r_line_data$r_colors[1], lwd = 2)
-					}
-					
-					# Adding Symptomatic label on rightmost panel
-					if (edgwgt == edgemax) {
-						mtext(side = 4, text = paste("issymptomatic =", issymptomatic), 
-						      col = "black", line = 1, cex = 0.75, 
-						      family = 'serif', font = 2)
-					}
+			# 	Helper function for plot_parameter_space: Dataplot Graph Ticks
+				dataplot_tick_function <- function(major_tick_length=0.035, minor_tick_ratio=0.25){
+					# 	Check if Hmisc is Present. If not, install it.
+						packages <- c('Hmisc')
+						install.packages(setdiff(packages, rownames(installed.packages()))) 
+							
+					# 	Add Dataplot Style- Through Tick Marks to Plot
+						Hmisc::minor.tick(nx = 2, ny = 2, tick.ratio = minor_tick_ratio)  
+						Hmisc::minor.tick(nx = 2, ny = 2, tick.ratio = -minor_tick_ratio)  
+						axis(2, tck=1, tck=-major_tick_length, labels = FALSE)
+						axis(1, tck=1, tck=-major_tick_length, labels = FALSE)
 				}
-			}
+
+			# 	Creating Layout
+				viz_matrix <- matrix(c(7,7,7,7,7,7,7,7,7,7,
+									1,1,1,2,2,2,3,3,3,8,
+									1,1,1,2,2,2,3,3,3,8,
+									1,1,1,2,2,2,3,3,3,8,
+									4,4,4,5,5,5,6,6,6,8,
+									4,4,4,5,5,5,6,6,6,8,
+									4,4,4,5,5,5,6,6,6,8,
+									9,9,9,9,9,9,9,9,9,9), 
+									ncol = 10, byrow = TRUE)
+				layout(viz_matrix)
 			
-			# Adding Plot Title
-			par(mar = c(0, 0, 0, 0), bty = 'n')
-			plot(0, type = 'n', xlab = ' ', ylab = ' ', 
-			     cex.axis = 1.3, xaxt = 'n', yaxt = 'n', 
-			     family = 'serif', las = 1, main = ' ')
-			text(x = 0.5, y = 0.5, 
-			     labels = "SIR Social Feedback Function Plot", 
-			     cex = 2.5, family = 'serif', font = 2)
+			# 	Looping Over Visualization Matrix
+				for (issymptomatic in seq(0, 1, 1)) {
+					# 	Filter for current symptomatic status
+						r_panel_data <- results[results$issymptomatic == issymptomatic, ]
+					
+						for (edgwgt in seq(1, edgemax, 1)) {
+							# 	Isolating Cell Data
+								r_cell_data <- r_panel_data[r_panel_data$edgwgt == edgwgt, ]
+							
+							# 	Creating Base Plot
+								par(mar=c(3, 4, 2, 2))
+								plot(NA, type="n", xlab = "", ylab = "Probability of Interaction", 
+									family = 'serif', xlim = c(0, 5), 
+									ylim = c(0, 1), las = 1, tck=0.015, xaxt='n', bty='L')
+
+							#	Adding Tick Marks
+								axis(1, padj=0.75, tck=0.015) 
+              					dataplot_tick_function(0.015, 0.40)
+
+							#	Adding Title
+								title(paste('edgwgt =', edgwgt), family='serif', cex.main=1.5, line=-1.15)
+								
+							# 	Adding Reference Lines
+								ref_lines <- seq(0, 1, 0.2)
+								for (ref_line in ref_lines) {
+									abline(h = ref_line, col = "gray60", lty = 3)
+								}
+							
+							# 	Plotting X-Axis Label
+								mtext(side = 1, text = 'Number of Ill Peers', 
+									  col = "black", line = 2.55, cex = 0.75, family = 'serif')
+							
+							# 	Plotting Lines for each ninf level
+								ninf_levels <- unique(r_cell_data$ninf)
+								for (ninf in ninf_levels) {
+									r_line_data <- r_cell_data[r_cell_data$ninf == ninf, ]
+									r_line_data <- r_line_data[order(r_line_data$peersinf), ]
+									lines(r_line_data$peersinf, r_line_data$prob_act, 
+										lty = 1, col = r_line_data$r_colors[1], lwd = 2)
+								}
+							
+							# 	Adding Symptomatic label on rightmost panel
+								if (edgwgt == edgemax) {
+									mtext(side = 4, text = paste("issymptomatic =", issymptomatic), 
+										col = "black", line = 1, cex = 0.75, 
+										family = 'serif', font = 2)
+								}
+						}
+				}
 			
-			# Adding Color Gradient Legend
-			unique_props <- sort(unique(results$prop_inf))
-			unique_colors <- character(length(unique_props))
-			for (i in 1:length(unique_props)) {
-				idx <- which(results$prop_inf == unique_props[i])[1]
-				unique_colors[i] <- results$r_colors[idx]
-			}
+			#	Adding Plot Title
+				par(mar = c(0, 0, 0, 0), bty = 'n')
+				plot(0, type = 'n', xlab = ' ', ylab = ' ', 
+					cex.axis = 1.3, xaxt = 'n', yaxt = 'n', 
+					family = 'serif', las = 1, main = ' ')
+				text(x = 1, y = 0.5, 
+					labels = "SIR Social Feedback Function Plot", 
+					cex = 2.5, family = 'serif', font = 2)
 			
-			legend_image <- as.raster(matrix(rev(unique_colors), ncol = 1))
+			# 	Adding Color Gradient Legend
+				unique_props <- sort(unique(results$prop_inf))
+				unique_colors <- character(length(unique_props))
+				for (i in 1:length(unique_props)) {
+					idx <- which(results$prop_inf == unique_props[i])[1]
+					unique_colors[i] <- results$r_colors[idx]
+				}
 			
-			par(mar = c(0, 0, 0, 0), bty = 'n')
-			plot(0, type = 'n', xlab = ' ', ylab = ' ', 
-			     xaxt = 'n', yaxt = 'n', cex.axis = 1.3, 
-			     family = 'serif', las = 1, main = ' ')
+				legend_image <- as.raster(matrix(rev(unique_colors), ncol = 1))
 			
-			rasterImage(legend_image, 0.90, -0.75, 1.01, 0.75)
-			text(x = 1.15, y = seq(-0.7, 0.7, length.out = 12), 
-			     labels = sprintf(\"%.2f\", seq(0, 0.55, 0.05)), 
-			     cex = 1, family = 'serif')
-			text(x = 1, y = 0.8, labels = "Prop. Inf.", 
-			     cex = 1.35, family = 'serif')
+				par(mar = c(0, 0, 0, 0), bty = 'n')
+				plot(0, type = 'n', xlab = ' ', ylab = ' ', 
+					xaxt = 'n', yaxt = 'n', cex.axis = 1.3, 
+					family = 'serif', las = 1, main = ' ')
 			
-			# Adding Parameter Annotation
-			par(mar = c(0, 0, 0, 0), bty = 'n')
-			plot(0, type = 'n', xlab = ' ', ylab = ' ', 
-			     cex.axis = 1.3, xaxt = 'n', yaxt = 'n', 
-			     family = 'serif', las = 1, main = ' ')
+				rasterImage(legend_image, 0.90, -0.75, 1.01, 0.75)
+				text(x = 1.15, y = seq(-0.7, 0.7, length.out = 12), 
+					labels = sprintf(\"%.2f\", seq(0, 0.55, 0.05)), 
+					cex = 1, family = 'serif')
+				text(x = 1, y = 0.8, labels = "Prop. Inf.", 
+					cex = 1.35, family = 'serif')
 			
-			param_text <- paste(
-				paste("b_int =", b_int),
-				paste("b_cxn_symp =", b_cxn_symp),
-				paste("b_cxn_global =", b_cxn_total),
-				paste("b_cxn_peers =", b_cxn_peers),
-				paste("b_close =", b_close),
-				paste("b_cls_x_smp =", b_cls_x_smp),
-				sep = "  "
-			)
+			# 	Adding Parameter Annotation
+				par(mar = c(0, 0, 0, 0), bty = 'n')
+				plot(0, type = 'n', xlab = ' ', ylab = ' ', 
+					cex.axis = 1.3, xaxt = 'n', yaxt = 'n', 
+					family = 'serif', las = 1, main = ' ')
 			
-			text(x = 0.5, y = 0.5, labels = param_text, 
-			     cex = 1.3, family = 'serif', font = 1)
+				param_text <- paste(
+					paste("b_int =", b_int),
+					paste("b_cxn_symp =", b_cxn_symp),
+					paste("b_cxn_global =", b_cxn_total),
+					paste("b_cxn_peers =", b_cxn_peers),
+					paste("b_close =", b_close),
+					sep = "  "
+				)
+			
+				text(x = 1, y = 0.5, labels = param_text, 
+					cex = 1.3, family = 'serif', font = 1)
 			"""
 		
 		#	Close graphics device if saving
@@ -706,11 +720,288 @@ module diffustion_sim
 	```
 	""" test_sim_parm_space
 
+#	Helper Function for sim_prep: load and parse GraphML file
+	function load_graphml(filepath::String)
+		"""
+		Args:
+			filepath::String: path to .graphml file
+		Returns:
+			NamedTuple: (nodes, edges, weights, node_labels) extracted from GraphML
+		Notes:
+			Parses GraphML directly to extract network structure.
+			Handles both weighted and unweighted networks.
+		"""
+		
+		#	Read and parse XML
+			doc = readxml(filepath)
+			root = doc.root
+			
+		#	Find graph element
+			graph = nothing
+			for child in eachelement(root)
+				if child.name == "graph"
+					graph = child
+					break
+				end
+			end
+			
+			if graph === nothing
+				error("No graph element found in GraphML file")
+			end
+			
+		#	Determine if directed
+			is_directed = haskey(graph, "edgedefault") && graph["edgedefault"] == "undirected" ? false : true
+			
+		#	Extract nodes by direct traversal
+			nodes_xml = []
+			node_ids = String[]
+			node_mapping = Dict{String, Int}()
+			
+			for elem in eachelement(graph)
+				if elem.name == "node"
+					push!(nodes_xml, elem)
+					node_id = elem["id"]
+					push!(node_ids, node_id)
+					node_mapping[node_id] = length(node_ids)
+				end
+			end
+			
+		#	Extract edges by direct traversal
+			edges_xml = []
+			el1 = Int[]
+			el2 = Int[]
+			elwgt = Float64[]
+			
+			for elem in eachelement(graph)
+				if elem.name == "edge"
+					source = elem["source"]
+					target = elem["target"]
+					
+					#	Map string IDs to integer indices
+						if haskey(node_mapping, source) && haskey(node_mapping, target)
+							src_idx = node_mapping[source]
+							tgt_idx = node_mapping[target]
+							
+							push!(el1, src_idx)
+							push!(el2, tgt_idx)
+							
+							#	Look for weight in data elements
+								weight = 1.0
+								for data_elem in eachelement(elem)
+									if data_elem.name == "data" && haskey(data_elem, "key")
+										# Check for various weight key names
+										if data_elem["key"] in ["e_weight", "weight", "value", "d1"]
+											weight_str = nodecontent(data_elem)
+											if !isempty(weight_str)
+												weight = parse(Float64, weight_str)
+											end
+											break
+										end
+									end
+								end
+								push!(elwgt, weight)
+							
+							#	Add reverse edge if undirected
+								if !is_directed
+									push!(el1, tgt_idx)
+									push!(el2, src_idx)
+									push!(elwgt, weight)
+								end
+						else
+							println("Warning: Edge references non-existent node(s): $source -> $target")
+						end
+				end
+			end
+			
+		#	Clean up
+			EzXML.finalize(doc) 
+			
+		#	Check if we found data
+			if isempty(node_ids)
+				error("No nodes found in GraphML file")
+			end
+			if isempty(el1)
+				error("No edges found in GraphML file")
+			end
+			println("Loaded network: $(length(node_ids)) nodes, $(length(el1)) directed edges")
+			
+		#	Return extracted data
+			return (
+				nodes = collect(1:length(node_ids)),
+				edges = (el1, el2),
+				weights = elwgt,
+				node_labels = node_ids
+			)
+	end
+
+#	Helper Function for sim_prep: convert valued edgelist to adjacency matrix
+	function el2adjval(valid::Vector{Int}, el1::Vector{Int}, el2::Vector{Int}, elwgt::Vector{Float64})
+		"""
+		Args:
+			valid::Vector{Int}: unique node identifiers
+			el1::Vector{Int}: source nodes of edges
+			el2::Vector{Int}: target nodes of edges
+			elwgt::Vector{Float64}: edge weights
+		Returns:
+			Tuple{Matrix{Float64}, Vector{Int}}: weighted adjacency matrix and node ordering
+		Notes:
+			Converts edge list representation to matrix form.
+			Matrix rows/columns ordered by valid node set.
+		"""
+		
+		#	Initialize adjacency matrix
+			nodeset = unique(valid)
+			n = length(nodeset)
+			adjmat = zeros(Float64, n, n)
+			
+		#	Create node index mapping
+			node_to_idx = Dict(node => idx for (idx, node) in enumerate(nodeset))
+		
+		#	Populate adjacency matrix
+			for i in 1:length(el1)
+				iv = el1[i]
+				jv = el2[i]
+				wv = elwgt[i]
+				
+				#	Map nodes to matrix indices
+					if haskey(node_to_idx, iv) && haskey(node_to_idx, jv)
+						iloc = node_to_idx[iv]
+						jloc = node_to_idx[jv]
+						adjmat[iloc, jloc] = wv
+					end
+			end
+		
+		#	Return matrix with node ordering
+			return (adjmat, nodeset)
+	end
+
+#	Network Data Preparation for SIR Simulation from GraphML
+	function sim_prep(graphml_file::String)
+		"""
+		Args:
+			graphml_file::String: path to .graphml file
+		Returns:
+			NamedTuple: (alst=adjacency_list, vlst=value_list)
+		Notes:
+			Loads GraphML file and converts to adjacency list format for sir_diffusion.
+			Each row contains node ID followed by neighbor IDs (0 for empty slots).
+			Value list contains corresponding edge weights.
+		"""
+		
+		#	Load network from GraphML
+			network_data = load_graphml(graphml_file)
+			nl = network_data.nodes
+			el1, el2 = network_data.edges
+			elwgt = network_data.weights
+			n = length(nl)
+		
+		#	Create binary adjacency matrix for structure
+			adj_mat_binary, nodeset = el2adjval(nl, el1, el2, ones(Float64, length(elwgt)))
+			
+		#	Calculate maximum degree
+			max_degree = maximum(sum(adj_mat_binary .> 0, dims=2))
+			
+		#	Initialize adjacency list and value list
+			alst = zeros(Int, n, Int(max_degree) + 1)  # +1 for node ID column
+			vlst = zeros(Float64, n, Int(max_degree) + 1)
+			
+		#	Populate node IDs in first column
+			for i in 1:n
+				alst[i, 1] = nodeset[i]
+				vlst[i, 1] = Float64(nodeset[i])
+			end
+		
+		#	Create weighted adjacency matrix
+			adj_mat_weighted, _ = el2adjval(nl, el1, el2, elwgt)
+		
+		#	Fill adjacency and value lists
+			for i in 1:n
+				#	Find neighbors
+					neighbors = findall(x -> x > 0, adj_mat_binary[i, :])
+					
+					if !isempty(neighbors)
+						#	Map indices to node IDs and extract weights
+							neighbor_ids = [nodeset[j] for j in neighbors]
+							weights = [adj_mat_weighted[i, j] for j in neighbors]
+							
+						#	Fill adjacency list
+							for (col, nid) in enumerate(neighbor_ids)
+								if col + 1 <= size(alst, 2)
+									alst[i, col + 1] = nid
+								end
+							end
+							
+						#	Fill value list
+							for (col, wgt) in enumerate(weights)
+								if col + 1 <= size(vlst, 2)
+									vlst[i, col + 1] = wgt
+								end
+							end
+					end
+			end
+		
+		#	Return formatted lists for simulation
+			return (alst = alst, vlst = vlst)
+	end
+	@doc raw"""
+	**Description**
+	Prepares network data from a GraphML file for use in SIR diffusion simulations.
+	Directly parses GraphML format and converts to adjacency list representation with
+	separate edge weight tracking.
+
+	**Usage**
+	`sim_prep(graphml_file)`
+
+	**Arguments**
+	- `graphml_file::String`: Path to .graphml file containing network data
+
+	**Details**
+	The function performs the following operations:
+	1. Parses GraphML file using EzXML to extract nodes, edges, and weights
+	2. Handles both directed and undirected graphs automatically
+	3. Converts to adjacency matrix representation internally
+	4. Transforms to adjacency list format where:
+	   - Each row represents a node
+	   - First column contains the node ID
+	   - Subsequent columns contain neighbor IDs (0 for empty slots)
+	5. Creates parallel value list containing edge weights
+	
+	GraphML weight attributes are detected automatically. The function looks for
+	edge attributes named "weight" or "value". If no weights are found, all edges
+	are assigned weight 1.0.
+	
+	For undirected graphs, edges are automatically duplicated in both directions
+	to create a symmetric adjacency representation.
+
+	**Value**
+	Returns a NamedTuple with two fields:
+	- `alst`: Matrix{Int} where row i contains node i's ID followed by its neighbor IDs
+	- `vlst`: Matrix{Float64} with same structure containing edge weights
+
+	**Examples**
+	```julia
+	# Load network from GraphML file
+	network_data = sim_prep("network.graphml")
+	alst = network_data.alst
+	vlst = network_data.vlst
+	
+	# Check network structure
+	n_nodes = size(alst, 1)
+	max_degree = size(alst, 2) - 1
+	println("Network has $n_nodes nodes with max degree $max_degree")
+	
+	# Use in SIR simulation
+	results = sir_diffusion(alst, vlst, [1], 0.02, 14, 100, 0.75,
+	                       -0.1, 1.0, -0.5, -3.5, -1.5, -0.1)
+	``` 
+	""" sim_prep
+
 #   Exporting Objects
     export arithmetic_mode,
            color_assignment,
            plot_parameter_space,
            sim_parm_space,
-           test_sim_parm_space
+           test_sim_parm_space,
+		   sim_prep
 
 end # module diffustion_sim
