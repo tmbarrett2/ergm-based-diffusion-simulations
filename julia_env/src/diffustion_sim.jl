@@ -2,9 +2,11 @@ module diffustion_sim
 #   Packages
     using CSV
     using DataFrames
+	using EzXML
+	using Random
     using RCall
     using Statistics
-	using EzXML
+	using StatsBase
    
 #   SUPPORT FUNCTIONS
 
@@ -875,6 +877,8 @@ module diffustion_sim
 			return (adjmat, nodeset)
 	end
 
+#	SIMULATION FUNCTIONS
+
 #	Network Data Preparation for SIR Simulation from GraphML
 	function sim_prep(graphml_file::String)
 		"""
@@ -996,12 +1000,424 @@ module diffustion_sim
 	``` 
 	""" sim_prep
 
+#	Helper Function for testing: convert matrix adjacency to vector format
+	function matrix_to_vector_adjacency(alst::Matrix{Int}, vlst::Matrix{Float64})
+		"""
+		Args:
+			alst::Matrix{Int}: adjacency matrix from sim_prep
+			vlst::Matrix{Float64}: value matrix from sim_prep
+		Returns:
+			Tuple: (alst_vec, vlst_vec) in vector of vectors format
+		Notes:
+			Converts matrix format to vector format required by sirdif.
+		"""
+		
+		#	Get dimensions
+			n = size(alst, 1)
+			
+		#	Initialize vector versions
+			alst_vec = Vector{Vector{Int}}(undef, n)
+			vlst_vec = Vector{Vector{Float64}}(undef, n)
+			
+		#	Convert each row
+			for i in 1:n
+				# Extract non-zero neighbors (skip first column which is node ID)
+				neighbors = Int[]
+				weights = Float64[]
+				
+				for j in 2:size(alst, 2)
+					if alst[i, j] > 0
+						push!(neighbors, alst[i, j])
+						push!(weights, vlst[i, j])
+					end
+				end
+				
+				alst_vec[i] = neighbors
+				vlst_vec[i] = weights
+			end
+			
+		#	Return converted format
+			return (alst_vec, vlst_vec)
+	end
+
+#	Helper Function for sirdif: simple transmission probability
+	function _transmission_simple(inf_r::Float64, edgwgt::Float64)
+		"""
+		Args:
+			inf_r::Float64: base infection rate
+			edgwgt::Float64: edge weight (unused in simple model)
+		Returns:
+			Int: 1 if transmission occurs, 0 otherwise
+		Notes:
+			Simple binomial transmission ignoring edge weights.
+		"""
+		
+		#	Simple transmission
+			return rand() < inf_r ? 1 : 0
+	end
+
+#	Helper Function for sirdif: edge-weighted transmission probability
+	function _transmission_weighted(inf_r::Float64, edgwgt::Float64)
+		"""
+		Args:
+			inf_r::Float64: base infection rate
+			edgwgt::Float64: edge weight modifying transmission
+		Returns:
+			Int: 1 if transmission occurs, 0 otherwise
+		Notes:
+			Transmission probability increases with edge weight.
+			Formula: p = 1 - (1 - inf_r)^edgwgt
+		"""
+		
+		#	Calculate edge-weight-adjusted probability
+			tranprob = 1.0 - (1.0 - inf_r)^edgwgt
+			
+		#	Return transmission outcome
+			return rand() < tranprob ? 1 : 0
+	end
+
+#	Developer Function: transmission probability with configurable method
+	function transmission_prob(inf_r::Float64, edgwgt::Float64; method::Symbol=:weighted)
+		"""
+		Args:
+			inf_r::Float64: base infection rate
+			edgwgt::Float64: edge weight
+			method::Symbol: :simple or :weighted (default :weighted)
+		Returns:
+			Int: 1 if transmission occurs, 0 otherwise
+		Notes:
+			Wrapper function selecting transmission method.
+		"""
+		
+		#	Select transmission method
+			if method == :simple
+				return _transmission_simple(inf_r, edgwgt)
+			elseif method == :weighted
+				return _transmission_weighted(inf_r, edgwgt)
+			else
+				error("Unknown transmission method: $method. Use :simple or :weighted")
+			end
+	end
+
+#	SIR Diffusion Simulation with Social Feedback (SAS-aligned)
+	function sirdif(alst_matrix::Matrix{Int64}, vlst_matrix::Matrix{Float64}, 
+	                infectedp::Vector{Int}, inf_r::Float64, rec_t::Int, 
+	                maxtime::Int, p_symp::Float64, b_int::Float64, 
+	                b_close::Float64, b_cxn_peers::Float64, b_cxn_total::Float64, 
+	                b_cxn_symp::Float64, b_cls_x_smp::Float64;
+	                transmission_method::Symbol=:weighted,
+	                immunity_duration::Union{Int,Nothing}=nothing)
+		"""
+		Args:
+			alst::Vector{Vector{Int}}: adjacency list (list of neighbor lists)
+			vlst::Vector{Vector{Float64}}: edge weights corresponding to adjacency list
+			infectedp::Vector{Int}: initial infected node indices
+			inf_r::Float64: base infection rate
+			rec_t::Int: recovery time in days
+			maxtime::Int: maximum simulation time
+			p_symp::Float64: probability of being symptomatic when infected
+			b_int::Float64: intercept parameter
+			b_close::Float64: effect of edge weight on interaction
+			b_cxn_peers::Float64: effect of infected peers
+			b_cxn_total::Float64: effect of global infection level
+			b_cxn_symp::Float64: effect of being symptomatic
+			b_cls_x_smp::Float64: interaction term (peers × symptomatic)
+			transmission_method::Symbol: :simple or :weighted (default :weighted)
+			immunity_duration::Union{Int,Nothing}: days of immunity after recovery (nothing = permanent)
+		Returns:
+			Dict: infection_log and total_time
+		Notes:
+			SAS-aligned implementation. When immunity_duration is set, implements SIRS model.
+		"""
+
+		#	Converting Input Matrices into Vectors
+			alst, vlst = matrix_to_vector_adjacency(alst_matrix, vlst_matrix)
+		
+		#	Start timing
+			start_time = time()
+		
+		#	Initialize simulation state
+			n = length(alst)
+			
+		#	Pre-allocate infection tracking arrays
+			infected = fill(-1, n)  # -1 indicates never infected
+			inftime = zeros(Int, n)
+			nbrsinf = zeros(Int, n)
+			recovered = fill(false, n)  # Track recovered status
+			immunity_timer = zeros(Int, n)  # Track immunity duration if applicable
+			
+		#	Initialize with seed infections
+			n_initial = length(infectedp)
+			infected[1:n_initial] = infectedp
+			inftime[1:n_initial] .= rec_t
+			
+		#	Create modifiable copy of adjacency list
+			s_alst = deepcopy(alst)
+			
+		#	Count initial infected neighbors (SAS logic)
+			for idx in 1:n_initial
+				inf_node = infectedp[idx]
+				# Get neighbors from s_alst (excludes missing values)
+				nbrs = s_alst[inf_node]
+				for nbr in nbrs
+					if nbr > 0
+						nbrsinf[nbr] += 1
+					end
+				end
+			end
+			
+		#	Remove initially infected from susceptible lists
+			for i in 1:n
+				for inf_node in infectedp
+					idx = findfirst(x -> x == inf_node, s_alst[i])
+					if idx !== nothing
+						s_alst[i][idx] = 0
+					end
+				end
+			end
+		
+		#	Initialize time series storage and tracking
+			timesum = Matrix{Float64}(undef, 0, 6)
+			pinf = n_initial / n
+			timesum = vcat(timesum, [0.0 n_initial pinf 0.0 0.0 0.0])
+			total_recovered = 0  # Track cumulative recovered
+		
+		#	Main simulation loop
+			for t in 1:maxtime
+				
+				#	Get currently infected
+					current_infected = infected[infected .> 0]
+					ninf = length(current_infected)
+					
+				#	Check if epidemic ended
+					if ninf == 0
+						break
+					end
+				
+				#	Process each infected individual
+					new_infections = Int[]
+					for j in 1:ninf
+						ego = current_infected[j]
+						ego_idx = findfirst(x -> x == ego, infected)
+						
+						#	Determine if symptomatic
+							issymptomatic = rand() < p_symp ? 1 : 0
+						
+						#	Get susceptible neighbors from s_alst
+							jnbr_indices = findall(x -> x > 0, s_alst[ego])
+							
+							if !isempty(jnbr_indices)
+								susceptible_nbrs = s_alst[ego][jnbr_indices]
+								
+								#	Get edge weights using indices
+									edgwgts = vlst[ego][jnbr_indices]
+									
+								#	Process each susceptible neighbor
+									for (k, alter) in enumerate(susceptible_nbrs)
+										edgwgt = edgwgts[k]
+										peersinf = nbrsinf[alter]
+										
+										#	Calculate activation probability
+											lwact = b_int + 
+											       (issymptomatic * b_cxn_symp) +
+											       (b_close * edgwgt) +
+											       (b_cxn_peers * peersinf) +
+											       (b_cxn_total * (ninf / (n/3))) +
+											       (b_cls_x_smp * peersinf * issymptomatic)
+											
+											prob_act = exp(lwact) / (1 + exp(lwact))
+											
+										#	Determine if edge activates
+											if rand() < prob_act
+												#	Check transmission
+													if transmission_prob(inf_r, edgwgt; method=transmission_method) == 1
+														push!(new_infections, alter)
+														
+														#	Update nbrsinf for ego's neighbors (SAS logic)
+														# 	This happens when alter gets infected
+															inf_nbrs = alst[ego]
+															for nbr in inf_nbrs
+																if nbr > 0
+																	nbrsinf[nbr] += 1
+																end
+															end
+													end
+											end
+									end
+							end
+						
+						#	Update recovery timer for this infected individual
+							inftime[ego_idx] -= 1
+					end
+				
+				#	Process new infections (unique only)
+					unique_new = unique(new_infections)
+					n_new = length(unique_new)
+					if n_new > 0
+						#	Find available slots in infected array
+							available_slots = findall(x -> x == -1, infected)
+							
+							if length(available_slots) >= n_new
+								#	Add new infections
+									for (i, new_inf) in enumerate(unique_new)
+										infected[available_slots[i]] = new_inf
+										inftime[available_slots[i]] = rec_t
+									end
+								
+								#	Remove from all susceptible lists
+									for i in 1:n
+										for new_inf in unique_new
+											idx = findfirst(x -> x == new_inf, s_alst[i])
+											if idx !== nothing
+												s_alst[i][idx] = 0
+											end
+										end
+									end
+							end
+					end
+				
+				#	Process recovery
+					recovered_mask = (inftime .== 0) .& (infected .> 0)
+					recovered_nodes = infected[recovered_mask]
+					n_recovered = length(recovered_nodes)
+					if n_recovered > 0
+						#	Mark as recovered
+							recovered[recovered_mask] .= true
+							total_recovered += n_recovered
+							
+						#	Set immunity timer if applicable
+							if immunity_duration !== nothing
+								immunity_timer[recovered_mask] .= immunity_duration
+							end
+							
+						#	Clear from infected list
+							infected[recovered_mask] .= -1
+							inftime[recovered_mask] .= 0
+					end
+				
+				#	Process waning immunity (SIRS model)
+					if immunity_duration !== nothing
+						#	Decrement immunity timers
+							immunity_timer[immunity_timer .> 0] .-= 1
+
+						#	Find those becoming susceptible again (timer hit 0 AND still flagged recovered)
+							becoming_susceptible = findall(i -> (immunity_timer[i] == 0) && recovered[i], eachindex(immunity_timer))
+
+						if !isempty(becoming_susceptible)
+							#	Re-add to susceptible lists
+								for node in becoming_susceptible
+									#	Mark as susceptible again (drop recovered flag)
+										recovered[node] = false
+
+									#	Add back to all neighbor lists where appropriate
+										for i in 1:n
+											if node in alst[i]
+												#	Skip if already present (defensive)
+													if node in s_alst[i]
+														continue
+													end
+
+												#	Find where to add it back
+													zero_idx = findfirst(x -> x == 0, s_alst[i])
+													if zero_idx !== nothing
+														s_alst[i][zero_idx] = node
+													else
+														#	If no zero slot exists, append
+														push!(s_alst[i], node)
+													end
+											end
+										end
+								end
+						end
+					end
+
+				#	Calculate epidemic metrics
+					current_infected_count = sum(infected .> 0)
+					NI = current_infected_count
+					NR = total_recovered
+					
+					prop_ever_inf = (NI + NR) / n
+					prop_cur_inf = NI / n
+					prop_rec = NR > 0 ? NR / (NI + NR) : 0.0
+					
+				#	Record time step
+					timesum = vcat(timesum, [Float64(t) NI prop_ever_inf prop_cur_inf NR prop_rec])
+			end
+		
+		#	Calculate total time
+			total_time = time() - start_time
+		
+		#	Return results as Dict
+			return Dict(
+				"infection_log" => timesum,
+				"total_time" => total_time
+			)
+	end
+	@doc raw"""
+	**Description**
+	Simulates an SIR/SIRS epidemic with social feedback mechanisms affecting contact rates.
+	SAS-aligned implementation with optional immunity waning for SIRS dynamics.
+
+	**Usage**
+	`sirdif(alst, vlst, infectedp, inf_r, rec_t, maxtime, p_symp, b_int, b_close, b_cxn_peers, b_cxn_total, b_cxn_symp, b_cls_x_smp; transmission_method=:weighted, immunity_duration=nothing)`
+
+	**Arguments**
+	- `alst::Vector{Vector{Int}}`: Adjacency list where each element is a vector of neighbor IDs
+	- `vlst::Vector{Vector{Float64}}`: Edge weights corresponding to adjacency list entries
+	- `infectedp::Vector{Int}`: Initial infected node indices
+	- `inf_r::Float64`: Base infection probability per contact
+	- `rec_t::Int`: Recovery time in days (constant)
+	- `maxtime::Int`: Maximum simulation days
+	- `p_symp::Float64`: Probability of being symptomatic when infected
+	- `b_int::Float64`: Baseline interaction level (intercept)
+	- `b_close::Float64`: Effect of edge weight on interaction
+	- `b_cxn_peers::Float64`: Effect of number of infected peers
+	- `b_cxn_total::Float64`: Effect of global infection prevalence
+	- `b_cxn_symp::Float64`: Effect of being symptomatic
+	- `b_cls_x_smp::Float64`: Interaction term (peers × symptomatic)
+	- `transmission_method::Symbol`: :simple or :weighted (default :weighted)
+	- `immunity_duration::Union{Int,Nothing}`: Days of immunity after recovery (nothing = permanent immunity/SIR model)
+
+	**Details**
+	Implements SAS-aligned logic where:
+	- `nbrsinf[i]` tracks exposures for node i's neighbors
+	- Updates occur when transmission happens, not just infection
+	- No decrement on recovery (matches SAS)
+	
+	When `immunity_duration` is set:
+	- Implements SIRS model with waning immunity
+	- Recovered individuals become susceptible again after immunity period
+	- Allows for reinfection cycles
+
+	**Value**
+	Returns a Dict containing:
+	- `"infection_log"`: Matrix with columns [time, n_infected, prop_ever_inf, prop_cur_inf, n_recovered, prop_recovered]
+	- `"total_time"`: Simulation runtime in seconds
+
+	**Examples**
+	```julia
+	# Standard SIR model (permanent immunity)
+	results = sirdif(alst, vlst, [1], 0.02, 14, 100, 0.75,
+	                -0.1, 1.0, -0.5, -3.5, -1.5, -0.1)
+	
+	# SIRS model with 30-day immunity
+	results = sirdif(alst, vlst, [1], 0.02, 14, 200, 0.75,
+	                -0.1, 1.0, -0.5, -3.5, -1.5, -0.1,
+	                immunity_duration=30)
+	```
+
+	**See Also**
+	`transmission_prob` for transmission model details
+	`sim_prep` for network data preparation
+	""" sirdif
+
 #   Exporting Objects
     export arithmetic_mode,
            color_assignment,
            plot_parameter_space,
            sim_parm_space,
            test_sim_parm_space,
-		   sim_prep
+		   sim_prep,
+		   sirdif
 
 end # module diffustion_sim
