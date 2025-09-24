@@ -2,6 +2,14 @@
 #Jonathan H. Morgan, Ph.D., James Moody Ph.D., & Tyler Barret
 #27 August 2025
 
+#	To Do:
+#	Complete SIRS testing
+#	Move Small Speed Test Loop into a Wrapper that R interfaces with
+#	Conduct Julia/R Test of Wrapper
+#	Conduct Jim's Full Sweep Tests
+#	Move Julia Package into an executable
+#	Create R Package that Call Julia Executable
+
 #   Pulling-In diffustion_sim & Activating Local Environment
     cd("/workspace/ergm-based-diffusion-simulations")
     using Pkg
@@ -16,6 +24,7 @@
 ################
 using CSV
 using DataFrames
+using ProgressMeter
 using Random
 using Statistics
 using diffustion_sim
@@ -579,6 +588,101 @@ using diffustion_sim
     end
 
     let log = sir_results["results"]["infection_log"]
+        peak_idx = findfirst(==(maximum(log[:,2])), log[:,2])
+        growth   = log[2:peak_idx, 2] ./ max.(1, log[1:peak_idx-1, 2])
+        println("Median pre-peak growth: ", round(median(growth), digits=3))
+        println("Prop. ever infected at peak: ", round(log[peak_idx, 3], digits=3))
+        println("Peak day: ", peak_idx, "   Peak NI: ", log[peak_idx, 2])
+    end
+
+#	Small Speed Test
+	directory = "/workspace/data/sim_test_data/synthetic_village_m_graphml"
+	graphml_files = readdir(directory)
+	results_list = Vector{Dict}(undef, length(graphml_files))
+	iteration_number = 0
+	@showprogress 1 "Running simulations…" for i in eachindex(graphml_files)
+		# 	Importing Network
+			iteration_number = i
+			network_data = sim_prep(string(directory, "/", graphml_files[i]))
+
+		#	Use matrix format directly from sim_prep (sirdif will convert internally)
+			alst = network_data.alst
+			vlst = network_data.vlst
+			n = size(alst, 1)
+
+		#	Set simulation parameters
+			params = Dict(
+				"inf_r"        => 0.33,
+				"rec_t"        => 14,
+				"maxtime"      => 200,
+				"p_symp"       => 0.5,
+				"b_int"        => -0.1,
+				"b_close"      => 1.0,
+				"b_cxn_peers"  => -0.5,
+				"b_cxn_total"  => -3.5,
+				"b_cxn_symp"   => -1.5,
+				"b_cls_x_smp"  => -0.1
+			)
+
+		#	Fixed seed nodes (within bounds)
+			raw_seeds = [5, 10, 15, 20, 25]
+			seed_nodes = [s for s in raw_seeds if 1 ≤ s ≤ n]
+			isempty(seed_nodes) && error("Provided seed nodes $(raw_seeds) are out of bounds for n = $n.")
+
+		#	Run simulation (SIR: permanent immunity)
+			results = sirdif(
+				alst, vlst, seed_nodes,
+				params["inf_r"], params["rec_t"], params["maxtime"], params["p_symp"],
+				params["b_int"], params["b_close"], params["b_cxn_peers"],
+				params["b_cxn_total"], params["b_cxn_symp"], params["b_cls_x_smp"];
+				transmission_method = :weighted,
+				immunity_duration   = nothing
+			)
+
+		#	Extract results
+			infection_log = results["infection_log"]
+			runtime = results["total_time"]
+
+		#	Key metrics
+			final_row     = infection_log[end, :]
+			final_size    = final_row[3]
+			peak_infected = maximum(infection_log[:, 2])
+			peak_time     = findfirst(==(peak_infected), infection_log[:, 2])
+
+		#	Populate Results Vector
+			results_list[i] = Dict(
+				"results" => results,
+				"metrics" => Dict(
+					"final_size"    => final_size,
+					"peak_infected" => peak_infected,
+					"peak_time"     => peak_time,
+					"duration"      => size(infection_log, 1) - 1
+				),
+				"params" => params,
+				"seeds"  => seed_nodes
+			)
+	end	
+
+#	Examing Outputs
+	network_26_results = results_list[1000]
+
+	let log = network_26_results["results"]["infection_log"]
+		#   Daily growth factors up to peak
+            peak_idx = findfirst(==(maximum(log[:,2])), log[:,2])
+            growth = log[2:peak_idx, 2] ./ max.(1, log[1:peak_idx-1, 2])
+            println("Median pre-peak growth factor: ", round(median(growth), digits=3))
+
+		#   Effective attack rate by peak day
+            prop_ever_at_peak = log[peak_idx, 3]
+            println("Prop. ever infected by peak day: ", round(prop_ever_at_peak, digits=3))
+	end
+
+    
+    let log = network_26_results["results"]["infection_log"]; ni = log[:,2]
+        println("NI (first 30 days): ", join(round.(ni[1:min(end,30)]), ", "))
+    end
+
+    let log = network_26_results["results"]["infection_log"]
         peak_idx = findfirst(==(maximum(log[:,2])), log[:,2])
         growth   = log[2:peak_idx, 2] ./ max.(1, log[1:peak_idx-1, 2])
         println("Median pre-peak growth: ", round(median(growth), digits=3))
