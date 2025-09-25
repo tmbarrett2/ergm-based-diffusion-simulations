@@ -26,6 +26,7 @@ using CSV
 using DataFrames
 using ProgressMeter
 using Random
+using RCall
 using Statistics
 using diffustion_sim
 
@@ -213,10 +214,13 @@ using diffustion_sim
 		Notes:
 			R-aligned SIRS test:
 			- Seeds = [5, 10, 15, 20, 25]
-			- inf_r=0.33, rec_t=14, maxtime=200, p_symp=0.5
-			- b_int=-0.1, b_close=1.0, b_cxn_peers=-0.5, b_cxn_total=-3.5,
+			- inf_r=0.33, rec_t=14, maxtime=400, p_symp=0.5
+			- b_int=-0.1, b_close=1.0, b_cxn_peers=-0.25, b_cxn_total=-2.0,
 			  b_cxn_symp=-1.5, b_cls_x_smp=-0.1
 			- SIRS enabled via immunity_duration=immunity_days
+
+			Infection log columns expected from `sirdif`:
+			[ time, NI, prop_ever_inf, prop_cur_inf, NR, prop_recovered, NImm ]
 		"""
 
 		#	Set random seed
@@ -231,12 +235,12 @@ using diffustion_sim
 			params = Dict(
 				"inf_r"        => 0.33,
 				"rec_t"        => 14,
-				"maxtime"      => 200,		# match R SIR tests
+				"maxtime"      => 400,
 				"p_symp"       => 0.5,
 				"b_int"        => -0.1,
 				"b_close"      => 1.0,
-				"b_cxn_peers"  => -0.5,
-				"b_cxn_total"  => -3.5,
+				"b_cxn_peers"  => -0.25,
+				"b_cxn_total"  => -2.0,
 				"b_cxn_symp"   => -1.5,
 				"b_cls_x_smp"  => -0.1
 			)
@@ -277,9 +281,14 @@ using diffustion_sim
 
 		#	Calculate key metrics
 			final_row = infection_log[end, :]
-			final_size = final_row[3]							# cumulative proportion ever infected
+			final_size = final_row[3]						# cumulative proportion ever infected
 			peak_infected = maximum(infection_log[:, 2])
 			peak_time = findfirst(x -> x == peak_infected, infection_log[:, 2])
+
+		#	Current immune count series (from sirdif column 7)
+			NImm_series = infection_log[:, 7]
+			peak_immune = maximum(NImm_series)
+			peak_immune_time = findfirst(x -> x == peak_immune, NImm_series)
 
 		#	Look for reinfection waves (robust peak detection)
 			infected_series = infection_log[:, 2]
@@ -291,7 +300,6 @@ using diffustion_sim
 				for i in eachindex(infected_series)
 					l = max(1, i - halfwin)
 					r = min(length(infected_series), i + halfwin)
-					#	mean without importing Statistics
 					smoothed[i] = sum(infected_series[l:r]) / (r - l + 1)
 				end
 
@@ -323,11 +331,12 @@ using diffustion_sim
 		#	Validation checks
 			checks = Dict{String, Bool}()
 
-			#	Check 1: Conservation (infected + recovered ≤ n)
-				total_affected = infection_log[:, 2] .+ infection_log[:, 5]
-				checks["conservation"] = all(total_affected .<= n)
+			#	Check 1: State bounds (SIRS-aware)
+				checks["infected_within_bounds"] = all((infection_log[:, 2] .>= 0) .& (infection_log[:, 2] .<= n))
+				checks["immune_within_bounds"]   = all((NImm_series .>= 0) .& (NImm_series .<= n))
+				checks["sirS_conservation"]      = all((infection_log[:, 2] .+ NImm_series) .<= n)
 
-			#	Check 2: Reinfection possible after immunity (using filtered peaks)
+			#	Check 2: Reinfection timing (using filtered peaks)
 				if n_waves > 1
 					wave_gaps = diff(peaks)
 					checks["reinfection_timing"] = all(wave_gaps .>= min_gap)
@@ -346,6 +355,7 @@ using diffustion_sim
 				println("  Runtime: $(round(runtime, digits=3)) seconds")
 				println("  Final size: $(round(final_size * 100, digits=2))%  (cumulative)")
 				println("  Peak infected: $peak_infected at time $peak_time")
+				println("  Peak immune: $peak_immune at time $peak_immune_time")
 				println("  Number of waves: $n_waves")
 				println("  Epidemic duration: $(size(infection_log, 1) - 1) days")
 
@@ -366,6 +376,8 @@ using diffustion_sim
 					"final_size" => final_size,
 					"peak_infected" => peak_infected,
 					"peak_time" => peak_time,
+					"peak_immune" => peak_immune,
+					"peak_immune_time" => peak_immune_time,
 					"duration" => size(infection_log, 1) - 1,
 					"n_waves" => n_waves
 				),
@@ -375,95 +387,253 @@ using diffustion_sim
 			)
 	end
 
-#	Comparative Test Function
-	function compare_sir_sirs(network_data::NamedTuple;
-	                         immunity_days::Int=30,
-	                         n_runs::Int=10,
-	                         verbose::Bool=true)
-		"""
-		Args:
-			network_data::NamedTuple: output from sim_prep
-			immunity_days::Int: immunity duration for SIRS
-			n_runs::Int: number of simulation runs for statistics
-			verbose::Bool: print detailed output
+#	Helper Function for SIR Comparator
+	function summarize_ts(df::DataFrame)
+		peak_val = maximum(df.Number_Infected)
+		peak_idx = findfirst(==(peak_val), df.Number_Infected)
+		Dict(
+			:final_size_prop => df.ProportionEverInfected[end],
+			:peak_infected   => peak_val,
+			:peak_time       => df.Time[peak_idx],
+			:duration_days   => df.Time[end] - df.Time[1]
+		)
+	end
+
+#	Helper: resolve a column by case-insensitive candidate names
+	function resolve_col(df::DataFrame, candidates::Vector{Symbol})
+		"""Resolve a DataFrame column (case-insensitive) from a list of candidate names."""
+		name_map = Dict{String,Symbol}()
+		for nm in names(df)
+			name_map[strip(lowercase(String(nm)))] = nm
+		end
+		for cand in candidates
+			key = strip(lowercase(String(cand)))
+			if haskey(name_map, key)
+				return name_map[key]
+			end
+		end
+		return nothing
+	end
+
+#	Helper: compute basic summary metrics for a normalized frame
+	function compute_summary_metrics(df::DataFrame)
+		"""Return Dict with :final_size, :peak_infected, :peak_time, :duration for the input series."""
+		peak_infected = maximum(df.Number_Infected)
+		peak_time_idx = findfirst(x -> x == peak_infected, df.Number_Infected)
+		return Dict(
+			:final_size => df.ProportionEverInfected[end],
+			:peak_infected => peak_infected,
+			:peak_time => df.Time[peak_time_idx],
+			:duration => df.Time[end] - df.Time[1]
+		)
+	end
+
+#	Comparator: Julia SIR vs SAS CSV (robust CSV column resolution)
+	function compare_sir_sim_to_sas(sim_or_test::Dict, sas_csv::String;
+	                                series::Symbol=:NI,
+	                                sas_case::Union{Nothing,Int}=nothing,
+	                                show_plot::Bool=true,
+	                                save_path::Union{Nothing,String}=nothing,
+	                                display::String=":0")
+		"""Args:
+			sim_or_test::Dict: either sirdif() result or test_*_model() result
+			sas_csv::String: path to SAS CSV file
+			series::Symbol: :NI, :prop_ever, :prop_cur, :NR, or :prop_rec
+			sas_case::Union{Nothing,Int}: specific case number to extract from SAS data
+			show_plot::Bool: whether to display plot interactively
+			save_path::Union{Nothing,String}: optional PDF output path
+			display::String: X11 display for plotting
 		Returns:
-			Dict: comparative statistics
+			Dict: comparison metrics and aligned data
 		Notes:
-			Runs multiple simulations to compare SIR and SIRS dynamics.
+			Compares Julia simulation with SAS output.
+			Handles both raw sirdif output and test wrapper results.
+			Infers network size from initial conditions.
 		"""
 		
-		#	Storage for results
-			sir_metrics = Dict(
-				"final_sizes" => Float64[],
-				"peak_infected" => Int[],
-				"durations" => Int[]
-			)
+		#	Unwrap test wrapper if present
+			sim_results = haskey(sim_or_test, "results") ? sim_or_test["results"] : sim_or_test
 			
-			sirs_metrics = Dict(
-				"final_sizes" => Float64[],
-				"peak_infected" => Int[],
-				"durations" => Int[],
-				"n_waves" => Int[]
-			)
+		#	Validate infection log exists
+			if !haskey(sim_results, "infection_log")
+				error("Input must contain 'infection_log' key")
+			end
 		
-		#	Run simulations
-			if verbose
-				println("="^60)
-				println("Running Comparative Tests")
-				println("="^60)
-				println("Number of runs: $n_runs")
+		#	Extract Julia infection log
+			log = sim_results["infection_log"]
+			
+		#	Validate log structure
+			if size(log, 2) < 6
+				error("infection_log must have at least 6 columns")
 			end
 			
-			for run in 1:n_runs
-				#	SIR simulation
-					sir_result = test_sir_model(network_data; 
-					                           seed=run * 100, 
-					                           verbose=false)
-					push!(sir_metrics["final_sizes"], sir_result["metrics"]["final_size"])
-					push!(sir_metrics["peak_infected"], sir_result["metrics"]["peak_infected"])
-					push!(sir_metrics["durations"], sir_result["metrics"]["duration"])
-				
-				#	SIRS simulation
-					sirs_result = test_sirs_model(network_data;
-					                             immunity_days=immunity_days,
-					                             seed=run * 100,
-					                             verbose=false)
-					push!(sirs_metrics["final_sizes"], sirs_result["metrics"]["final_size"])
-					push!(sirs_metrics["peak_infected"], sirs_result["metrics"]["peak_infected"])
-					push!(sirs_metrics["durations"], sirs_result["metrics"]["duration"])
-					push!(sirs_metrics["n_waves"], sirs_result["metrics"]["n_waves"])
-					
-				if verbose && run % 5 == 0
-					println("  Completed run $run/$n_runs")
+		#	Convert to DataFrame
+			df_julia = DataFrame(
+				Time = Int.(log[:, 1]),
+				Number_Infected = Int.(log[:, 2]),
+				ProportionEverInfected = log[:, 3],
+				ProportionCurrentlyInfected = log[:, 4],
+				Number_Recovered = Int.(log[:, 5]),
+				ProportionRecovered = log[:, 6]
+			)
+		
+		#	Infer network size from initial conditions
+			n0_infected = df_julia.Number_Infected[1]
+			n0_prop_ever = df_julia.ProportionEverInfected[1]
+			if n0_prop_ever <= 0
+				error("Cannot infer network size: initial proportion ever infected is zero")
+			end
+			n_estimated = round(Int, n0_infected / n0_prop_ever)
+			if n_estimated <= 0
+				error("Inferred network size must be positive")
+			end
+		
+		#	Load SAS CSV
+			df_sas_raw = CSV.read(sas_csv, DataFrame)
+
+		#	Resolve required/optional columns (case-insensitive)
+			col_TIME = resolve_col(df_sas_raw, Symbol.(["TIME","Time","time"]))
+			col_EVER = resolve_col(df_sas_raw, Symbol.(["PROPEVERINF","PropEverInf","propeverinf"]))
+			col_CURR = resolve_col(df_sas_raw, Symbol.(["PROPCURRINF","PropCurrInf","propcurrinf"]))
+			col_REC  = resolve_col(df_sas_raw, Symbol.(["PROPREC","PropRec","proprec"]))
+			col_CASE = resolve_col(df_sas_raw, Symbol.(["case","CASE","Case"]))
+
+			if col_TIME === nothing
+				error("SAS CSV missing TIME column. Found columns: $(names(df_sas_raw))")
+			end
+			if col_EVER === nothing
+				error("SAS CSV missing PROPEVERINF column. Found columns: $(names(df_sas_raw))")
+			end
+
+		#	Optional filter by case
+			if sas_case !== nothing && col_CASE !== nothing
+				df_sas_raw = filter(row -> row[col_CASE] == sas_case, df_sas_raw)
+			elseif col_CASE !== nothing
+				ucases = unique(df_sas_raw[!, col_CASE])
+				if length(ucases) > 1
+					df_sas_raw = filter(row -> row[col_CASE] == first(ucases), df_sas_raw)
 				end
 			end
+
+		#	Standardize schema
+			rename!(df_sas_raw, Dict(col_TIME => :Time, col_EVER => :ProportionEverInfected))
+			if col_CURR !== nothing
+				rename!(df_sas_raw, Dict(col_CURR => :ProportionCurrentlyInfected))
+			else
+				df_sas_raw.ProportionCurrentlyInfected = fill(NaN, nrow(df_sas_raw))
+			end
+
+			if col_REC !== nothing
+				rename!(df_sas_raw, Dict(col_REC => :ProportionRecovered))
+			else
+				df_sas_raw.ProportionRecovered = fill(NaN, nrow(df_sas_raw))
+			end
+
+		#	Back-fill missing columns from identities
+			E  = df_sas_raw.ProportionEverInfected
+			Rf = df_sas_raw.ProportionRecovered
+			Pc = df_sas_raw.ProportionCurrentlyInfected
+			for i in 1:nrow(df_sas_raw)
+				if (isnan(Rf[i]) || ismissing(Rf[i])) && !(isnan(Pc[i]) || ismissing(Pc[i])) && E[i] > 0
+					Rf[i] = 1 - (Pc[i] / E[i])
+				end
+			end
+			Rf .= coalesce.(Rf, 0.0)
+			for i in 1:nrow(df_sas_raw)
+				if isnan(Pc[i]) || ismissing(Pc[i])
+					Pc[i] = E[i] * (1 - Rf[i])
+				end
+			end
+
+		#	Finalize SAS frame
+			df_sas = DataFrame(
+				Time = Int.(df_sas_raw.Time),
+				ProportionEverInfected = E,
+				ProportionCurrentlyInfected = Pc,
+				ProportionRecovered = Rf
+			)
+			df_sas.Number_Infected = round.(Int, n_estimated .* df_sas.ProportionCurrentlyInfected)
+			df_sas.Number_Recovered = round.(Int, n_estimated .* df_sas.ProportionEverInfected .* df_sas.ProportionRecovered)
 		
-		#	Calculate statistics
-			if verbose
-				println("\n" * "="^40)
-				println("Comparative Results ($n_runs runs):")
-				println("\nSIR Model:")
-				println("  Final size: $(round(mean(sir_metrics["final_sizes"]) * 100, digits=1))% " *
-				       "(SD: $(round(std(sir_metrics["final_sizes"]) * 100, digits=1))%)")
-				println("  Peak infected: $(round(mean(sir_metrics["peak_infected"]), digits=1)) " *
-				       "(SD: $(round(std(sir_metrics["peak_infected"]), digits=1)))")
-				println("  Duration: $(round(mean(sir_metrics["durations"]), digits=1)) days " *
-				       "(SD: $(round(std(sir_metrics["durations"]), digits=1)))")
-				
-				println("\nSIRS Model (immunity = $immunity_days days):")
-				println("  Final size: $(round(mean(sirs_metrics["final_sizes"]) * 100, digits=1))% " *
-				       "(SD: $(round(std(sirs_metrics["final_sizes"]) * 100, digits=1))%)")
-				println("  Peak infected: $(round(mean(sirs_metrics["peak_infected"]), digits=1)) " *
-				       "(SD: $(round(std(sirs_metrics["peak_infected"]), digits=1)))")
-				println("  Duration: $(round(mean(sirs_metrics["durations"]), digits=1)) days " *
-				       "(SD: $(round(std(sirs_metrics["durations"]), digits=1)))")
-				println("  Average waves: $(round(mean(sirs_metrics["n_waves"]), digits=1))")
+		#	Define series mapping
+			series_map = Dict(
+				:NI => (:Number_Infected, "Number Infected"),
+				:prop_ever => (:ProportionEverInfected, "Proportion Ever Infected"),
+				:prop_cur => (:ProportionCurrentlyInfected, "Proportion Currently Infected"),
+				:NR => (:Number_Recovered, "Number Recovered"),
+				:prop_rec => (:ProportionRecovered, "Proportion Recovered")
+			)
+			if !haskey(series_map, series)
+				error("Invalid series: $series. Choose from: $(keys(series_map))")
+			end
+			series_col, series_label = series_map[series]
+		
+		#	Align time series
+			julia_series = select(df_julia, [:Time, series_col])
+			rename!(julia_series, series_col => :julia)
+			sas_series = select(df_sas, [:Time, series_col])
+			rename!(sas_series, series_col => :sas)
+			aligned = innerjoin(julia_series, sas_series, on=:Time)
+			sort!(aligned, :Time)
+			n_pairs = nrow(aligned)
+			if n_pairs == 0
+				error("No overlapping time points between Julia and SAS")
 			end
 		
-		#	Return comparative results
+		#	Error metrics
+			correlation = n_pairs > 1 ? cor(aligned.julia, aligned.sas) : NaN
+			mae = mean(abs.(aligned.julia .- aligned.sas))
+			rmse = sqrt(mean((aligned.julia .- aligned.sas).^2))
+			errors = Dict(
+				:n => n_pairs,
+				:correlation => correlation,
+				:mae => mae,
+				:rmse => rmse
+			)
+		
+		#	Summary metrics
+			julia_metrics = compute_summary_metrics(df_julia)
+			sas_metrics = compute_summary_metrics(df_sas)
+		
+		#	PLOT (RCall)
+			@rput aligned series_label show_plot save_path display correlation mae rmse
+			R"""
+			if (!is.null(save_path)) {
+				pdf(save_path, width=8, height=5)
+				plot_device <- "pdf"
+			} else if (show_plot) {
+				Sys.setenv(DISPLAY = display)
+				X11(type="cairo", width=8, height=5)
+				plot_device <- "x11"
+			} else {
+				pdf(tempfile(fileext=".pdf"), width=8, height=5)
+				plot_device <- "temp"
+			}
+			par(mar=c(4,4,2,1))
+			plot(aligned$Time, aligned$sas,
+			     type="l", lwd=2, col="gray40",
+			     xlab="Time (days)", ylab=series_label,
+			     las=1, bty="n",
+			     main="SIR Model Comparison: Julia vs SAS")
+			lines(aligned$Time, aligned$julia, lwd=2, col="black")
+			legend("topleft", legend=c("SAS","Julia"),
+			       col=c("gray40","black"), lwd=2, bty="n")
+			mtext(paste("Correlation:", round(correlation, 3),
+			            " MAE:", round(mae, 2),
+			            " RMSE:", round(rmse, 2)),
+			      side=3, line=0.5, cex=0.8)
+			if (plot_device %in% c("pdf","temp")) dev.off()
+			"""
+			plot_saved = save_path !== nothing
+		
+		#	Return comparison results
 			return Dict(
-				"sir" => sir_metrics,
-				"sirs" => sirs_metrics
+				"julia_metrics" => julia_metrics,
+				"sas_metrics" => sas_metrics,
+				"errors" => errors,
+				"aligned" => aligned,
+				"plot_saved" => plot_saved,
+				"network_size" => n_estimated
 			)
 	end
 
@@ -691,7 +861,7 @@ using diffustion_sim
     end
 
 #   SIRS Simulation Tests
-    sirs_results = test_sirs_model(network_data; immunity_days=30, seed=42, verbose=true)
+    sirs_results = test_sirs_model(network_data; immunity_days=14, seed=42, verbose=true)
 
 #	Pre-peak growth + attack rate at peak
 	let log = sirs_results["results"]["infection_log"]
@@ -806,7 +976,22 @@ using diffustion_sim
 		println("Peak day: ", peak_idx, "   Peak NI: ", log[peak_idx, 2])
 	end
 
-
 #   Comparisative Tests
+	comp_results = compare_sir_sim_to_sas(sir_results["results"],
+										  "/workspace/data/sim_test_data/SAS_Simulation_Outputs.csv";
+										  series     = :NI,                 # choose :NI, :prop_ever, :prop_cur, :NR
+										  show_plot  = true,                # open X11 window
+										  save_path  = nothing,             # or provide a PDF path like "sir_overlay.pdf"
+										  display    = ":100"               # adjust if remote DISPLAY differs
+					)
 
+#	COME BACK HERE!!!!!
+#	ERROR: MethodError: Cannot `convert` an object of type String to an object of type Symbol
+# 	The function `convert` exists, but no method is defined for this combination of argument types.
+#	Should use parse() here.
+
+# 	Inspect results
+	println("Comparison errors: ", comp_results[:errors])
+	println("Julia metrics: ", comp_results[:julia_metrics])
+	println("SAS metrics: ", comp_results[:sas_metrics])
 
