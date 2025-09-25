@@ -877,19 +877,201 @@ module diffustion_sim
 			return (adjmat, nodeset)
 	end
 
+#	Helper Function for preprocess_network_sas_style: convert adjacency to matrix
+	function adjacency_list_to_matrix(alst::Matrix{Int}, vlst::Matrix{Float64})
+		"""
+		Args:
+			alst::Matrix{Int}: adjacency list (node ID in column 1, neighbors in 2:end)
+			vlst::Matrix{Float64}: value list (matching structure)
+		Returns:
+			Tuple{Matrix{Float64}, Vector{Int}}: (adjacency_matrix, node_ids)
+		Notes:
+			Converts adjacency list format to square adjacency matrix.
+		"""
+		
+		#	Get node IDs from first column
+			node_ids = alst[:, 1]
+			n = length(node_ids)
+			
+		#	Initialize adjacency matrix
+			adj_matrix = zeros(Float64, n, n)
+			
+		#	Fill matrix from adjacency list
+			for i in 1:n
+				for j in 2:size(alst, 2)
+					neighbor = alst[i, j]
+					if neighbor > 0
+						#	Find neighbor's row index
+							neighbor_idx = findfirst(x -> x == neighbor, node_ids)
+							if neighbor_idx !== nothing
+								adj_matrix[i, neighbor_idx] = vlst[i, j]
+							end
+					end
+				end
+			end
+			
+		#	Return matrix and node ordering
+			return (adj_matrix, node_ids)
+	end
+
+#	Helper Function for preprocess_network_sas_style: convert matrix back to adjacency list
+	function matrix_to_adjacency_list(adj_matrix::Matrix{Float64}, node_ids::Vector{Int})
+		"""
+		Args:
+			adj_matrix::Matrix{Float64}: weighted adjacency matrix
+			node_ids::Vector{Int}: node IDs corresponding to matrix rows/columns
+		Returns:
+			Tuple{Matrix{Int}, Matrix{Float64}}: (alst, vlst)
+		Notes:
+			Converts matrix format back to adjacency list format.
+		"""
+		
+		#	Calculate maximum degree
+			n = size(adj_matrix, 1)
+			max_degree = maximum(sum(adj_matrix .> 0, dims=2))
+			
+		#	Initialize adjacency and value lists
+			alst = zeros(Int, n, Int(max_degree) + 1)
+			vlst = zeros(Float64, n, Int(max_degree) + 1)
+			
+		#	Fill node IDs in first column
+			alst[:, 1] = node_ids
+			vlst[:, 1] = Float64.(node_ids)
+			
+		#	Fill adjacency and value lists
+			for i in 1:n
+				neighbors = findall(x -> x > 0, adj_matrix[i, :])
+				if !isempty(neighbors)
+					for (col, j) in enumerate(neighbors)
+						if col + 1 <= size(alst, 2)
+							alst[i, col + 1] = node_ids[j]
+							vlst[i, col + 1] = adj_matrix[i, j]
+						end
+					end
+				end
+			end
+			
+		#	Return lists
+			return (alst, vlst)
+	end
+
+#	Preprocess Network to Match SAS IML Code
+	function preprocess_network_sas_style(alst::Matrix{Int}, vlst::Matrix{Float64})
+		"""
+		Args:
+			alst::Matrix{Int}: raw adjacency list from sim_prep
+			vlst::Matrix{Float64}: raw value list from sim_prep  
+		Returns:
+			Tuple{Matrix{Int}, Matrix{Float64}}: (processed_alst, processed_vlst)
+		Notes:
+			Replicates SAS preprocessing:
+			1. Symmetrizes the network
+			2. Adds common third-party connections
+			3. Takes square root of common thirds
+			4. Returns in adjacency list format
+		"""
+		
+		#	Convert to matrix format
+			adj_matrix, node_ids = adjacency_list_to_matrix(alst, vlst)
+			
+		#	Symmetrize: symmat = (amat + amat`)
+			symmat = adj_matrix + transpose(adj_matrix)
+			
+		#	Calculate common thirds: com3rds = ((symmat>0)*(symmat>0))#(symmat>0)
+		#	This is the element-wise product of the binary adjacency matrix with itself
+		#	In SAS: A#B is element-wise multiplication, * is matrix multiplication
+			binary_mat = Float64.(symmat .> 0)
+			com3rds = (binary_mat * binary_mat) .* binary_mat
+			
+		#	Take square root of common thirds: com3rds = com3rds##(0.5)
+		#	In SAS: ## is element-wise power
+			com3rds = sqrt.(com3rds)
+			
+		#	Add common thirds to symmetrized matrix
+			symmat = symmat + com3rds
+			
+		#	Convert back to adjacency list format
+			processed_alst, processed_vlst = matrix_to_adjacency_list(symmat, node_ids)
+			
+		#	Return processed networks
+			return (processed_alst, processed_vlst)
+	end
+	@doc raw"""
+	**Description**
+	Preprocesses a network to match the exact transformations performed in the SAS IML code.
+	This ensures Julia simulations use the same network structure as SAS simulations.
+
+	**Usage**
+	`preprocess_network_sas_style(alst, vlst)`
+
+	**Arguments**
+	- `alst::Matrix{Int}`: Raw adjacency list from `sim_prep`
+	- `vlst::Matrix{Float64}`: Raw value list from `sim_prep`
+
+	**Details**
+	The function performs the following transformations to match SAS:
+	
+	1. **Symmetrization**: Creates an undirected network by adding the adjacency matrix 
+	   to its transpose: `symmat = A + A'`
+	
+	2. **Common third-party connections**: Identifies paths of length 2 between nodes.
+	   For nodes i and j, this counts how many nodes k exist where both i→k and k→j.
+	   Computed as: `com3rds = (A_binary * A_binary) ⊙ A_binary`
+	
+	3. **Square root weighting**: Takes element-wise square root of common thirds
+	   to moderate their influence: `com3rds = sqrt(com3rds)`
+	
+	4. **Final network**: Adds common thirds to symmetrized network:
+	   `final = symmat + com3rds`
+	
+	This preprocessing strengthens connections between nodes that share common neighbors,
+	which can significantly affect epidemic dynamics by creating additional transmission
+	pathways and stronger clustering.
+
+	**Value**
+	Returns a tuple `(processed_alst, processed_vlst)`:
+	- `processed_alst::Matrix{Int}`: Preprocessed adjacency list
+	- `processed_vlst::Matrix{Float64}`: Preprocessed edge weights
+
+	**Examples**
+	```julia
+	# Load raw network
+	network_data = sim_prep("network.graphml")
+	
+	# Apply SAS-style preprocessing
+	alst_processed, vlst_processed = preprocess_network_sas_style(
+	    network_data.alst, 
+	    network_data.vlst
+	)
+	
+	# Use in simulation (now matches SAS)
+	results = sirdif(alst_processed, vlst_processed, [1], 
+	                0.02, 14, 200, 0.75,
+	                -0.1, 1.0, -0.5, -3.5, -1.5, -0.1)
+	
+	# Compare network properties
+	raw_edges = sum(network_data.vlst .> 0)
+	processed_edges = sum(vlst_processed .> 0)
+	println("Raw edges: $raw_edges, Processed edges: $processed_edges")
+	```
+
+	**See Also**
+	`sim_prep`, `sirdif`, `replicate_sas_simulation`
+	""" preprocess_network_sas_style
+
 #	SIMULATION FUNCTIONS
 
 #	Network Data Preparation for SIR Simulation from GraphML
-	function sim_prep(graphml_file::String)
+	function sim_prep(graphml_file::String; sas_transformation::Bool = false)
 		"""
 		Args:
 			graphml_file::String: path to .graphml file
+			sas_transformation::Bool: apply SAS-style preprocessing (default false)
 		Returns:
 			NamedTuple: (alst=adjacency_list, vlst=value_list)
 		Notes:
 			Loads GraphML file and converts to adjacency list format for sir_diffusion.
-			Each row contains node ID followed by neighbor IDs (0 for empty slots).
-			Value list contains corresponding edge weights.
+			If sas_transformation=true, applies symmetrization and common thirds.
 		"""
 		
 		#	Load network from GraphML
@@ -901,6 +1083,30 @@ module diffustion_sim
 		
 		#	Create binary adjacency matrix for structure
 			adj_mat_binary, nodeset = el2adjval(nl, el1, el2, ones(Float64, length(elwgt)))
+			
+		#	Create weighted adjacency matrix
+			adj_mat_weighted, _ = el2adjval(nl, el1, el2, elwgt)
+			
+		#	Apply SAS transformation if requested
+			if sas_transformation
+				#	Symmetrize: symmat = (amat + transpose(amat))
+					symmat = adj_mat_weighted + transpose(adj_mat_weighted)
+					
+				#	Calculate common thirds
+					binary_mat = Float64.(symmat .> 0)
+					com3rds = (binary_mat * binary_mat) .* binary_mat
+					
+				#	Take square root of common thirds
+					com3rds = sqrt.(com3rds)
+					
+				#	Add common thirds to symmetrized matrix
+					adj_mat_weighted = symmat + com3rds
+					
+				#	Update binary matrix for structure
+					adj_mat_binary = Float64.(adj_mat_weighted .> 0)
+					
+				println("Applied SAS transformation: symmetrization + common thirds")
+			end
 			
 		#	Calculate maximum degree
 			max_degree = maximum(sum(adj_mat_binary .> 0, dims=2))
@@ -914,9 +1120,6 @@ module diffustion_sim
 				alst[i, 1] = nodeset[i]
 				vlst[i, 1] = Float64(nodeset[i])
 			end
-		
-		#	Create weighted adjacency matrix
-			adj_mat_weighted, _ = el2adjval(nl, el1, el2, elwgt)
 		
 		#	Fill adjacency and value lists
 			for i in 1:n
@@ -951,31 +1154,37 @@ module diffustion_sim
 	**Description**
 	Prepares network data from a GraphML file for use in SIR diffusion simulations.
 	Directly parses GraphML format and converts to adjacency list representation with
-	separate edge weight tracking.
+	optional SAS-style preprocessing for comparison with SAS PROC IML simulations.
 
 	**Usage**
-	`sim_prep(graphml_file)`
+	`sim_prep(graphml_file; sas_transformation=false)`
 
 	**Arguments**
 	- `graphml_file::String`: Path to .graphml file containing network data
+	- `sas_transformation::Bool`: Apply SAS-style preprocessing (default `false`)
 
 	**Details**
 	The function performs the following operations:
 	1. Parses GraphML file using EzXML to extract nodes, edges, and weights
 	2. Handles both directed and undirected graphs automatically
-	3. Converts to adjacency matrix representation internally
-	4. Transforms to adjacency list format where:
+	3. If `sas_transformation=true`, applies these transformations:
+	   - **Symmetrization**: Creates undirected network via `A + A'`
+	   - **Common thirds**: Adds edges between nodes sharing neighbors via `(A*A) ⊙ A`
+	   - **Square root weighting**: Applies `sqrt()` to common third connections
+	   - **Combination**: Final network = symmetrized + sqrt(common thirds)
+	4. Converts to adjacency list format where:
 	   - Each row represents a node
 	   - First column contains the node ID
 	   - Subsequent columns contain neighbor IDs (0 for empty slots)
 	5. Creates parallel value list containing edge weights
 	
-	GraphML weight attributes are detected automatically. The function looks for
-	edge attributes named "weight" or "value". If no weights are found, all edges
-	are assigned weight 1.0.
+	The SAS transformation significantly changes network topology by adding edges
+	between nodes that share common neighbors, which can increase epidemic spread
+	by creating additional transmission pathways.
 	
-	For undirected graphs, edges are automatically duplicated in both directions
-	to create a symmetric adjacency representation.
+	GraphML weight attributes are detected automatically. The function looks for
+	edge attributes named "weight", "value", "e_weight", or "d1". If no weights 
+	are found, all edges are assigned weight 1.0.
 
 	**Value**
 	Returns a NamedTuple with two fields:
@@ -984,20 +1193,29 @@ module diffustion_sim
 
 	**Examples**
 	```julia
-	# Load network from GraphML file
+	# Load network without SAS preprocessing (raw network)
 	network_data = sim_prep("network.graphml")
-	alst = network_data.alst
-	vlst = network_data.vlst
 	
-	# Check network structure
-	n_nodes = size(alst, 1)
-	max_degree = size(alst, 2) - 1
-	println("Network has $n_nodes nodes with max degree $max_degree")
+	# Load network with SAS preprocessing (for comparison with SAS)
+	network_sas = sim_prep("network.graphml", sas_transformation=true)
 	
-	# Use in SIR simulation
-	results = sir_diffusion(alst, vlst, [1], 0.02, 14, 100, 0.75,
-	                       -0.1, 1.0, -0.5, -3.5, -1.5, -0.1)
-	``` 
+	# Compare network properties
+	raw_edges = sum(network_data.vlst .> 0)
+	sas_edges = sum(network_sas.vlst .> 0)
+	println("Raw edges: $raw_edges, SAS-processed edges: $sas_edges")
+	
+	# Use in simulations
+	# For Julia-only studies:
+	results_julia = sirdif(network_data.alst, network_data.vlst, [1], 
+	                      0.02, 14, 200, 0.75, -0.1, 1.0, -0.5, -3.5, -1.5, -0.1)
+	
+	# For SAS comparison studies:
+	results_sas_style = sirdif(network_sas.alst, network_sas.vlst, [1], 
+	                          0.02, 14, 200, 0.75, -0.1, 1.0, -0.5, -3.5, -1.5, -0.1)
+	```
+
+	**See Also**
+	`sirdif`, `replicate_sas_simulation`, `sas_simulation_comparer`
 	""" sim_prep
 
 #	Helper Function for sirdif: convert matrix adjacency to vector format
@@ -1136,9 +1354,8 @@ module diffustion_sim
 		Returns:
 			Dict{String, Any}: infection_log and total_time
 		Notes:
-			SAS-aligned implementation with pre-allocation optimizations.
-			Accepts both matrix and vector formats for flexibility.
-			When immunity_duration is set, implements SIRS model.
+			SAS-aligned processing: immediate infection updates within timestep.
+			Updates nbrsinf for ego's neighbors when alter gets infected.
 		"""
 		
 		#	Convert matrix input to vector format if needed
@@ -1194,17 +1411,16 @@ module diffustion_sim
 			timesum = vcat(timesum, [0.0 n_initial pinf 0.0 0.0 0.0 0.0])
 			total_recovered = 0
 		
-		#	Pre-allocate buffer for new infections
+		#	Pre-allocate buffer for tracking new infections
 			new_infections_buf = Vector{Int}(undef, n)
-			queued = falses(n)
+			new_infections_cnt = 0
 			
 		#	Main simulation loop
 			for t in 1:maxtime
-				#	Reset per-timestep buffers
+				#	Reset new infections counter
 					new_infections_cnt = 0
-					fill!(queued, false)
-				
-				#	Get currently infected
+					
+				#	Get currently infected at start of timestep
 					current_infected = infected[infected .> 0]
 					ninf = length(current_infected)
 					
@@ -1242,20 +1458,34 @@ module diffustion_sim
 											
 											prob_act = exp(lwact) / (1 + exp(lwact))
 											
-										#	Determine if edge activates
+										#   Determine if edge activates
 											if rand() < prob_act
-												#	Check transmission
+												#   Check transmission
 													if transmission_prob(inf_r, edgwgt; method=transmission_method) == 1
-														#	Record infection (deduplicated)
-															if !queued[alter]
-																new_infections_cnt += 1
-																new_infections_buf[new_infections_cnt] = alter
-																queued[alter] = true
+														#   IMMEDIATE PROCESSING (SAS-style)
+														#   Track new infection
+															new_infections_cnt += 1
+															new_infections_buf[new_infections_cnt] = alter
+															
+														#   Find first available slot and add immediately
+															avail_slot = findfirst(x -> x == -1, infected)
+															if avail_slot !== nothing
+																infected[avail_slot] = alter
+																inftime[avail_slot] = rec_t
+															end
+
+														#   Remove alter from ALL susceptible lists immediately
+															@inbounds for r in 1:n
+																idx_r = findfirst(x -> x == alter, s_alst[r])
+																if idx_r !== nothing
+																	s_alst[r][idx_r] = 0
+																end
 															end
 															
-														#	Update nbrsinf for ego's neighbors (SAS logic)
-															inf_nbrs = alst[ego]
-															for nbr in inf_nbrs
+														#   Update nbrsinf for EGO's neighbors (SAS logic)
+														#   This tells ego's neighbors that one more of their neighbors (alter) is infected
+															ego_nbrs = alst[ego]
+															for nbr in ego_nbrs
 																if nbr > 0
 																	nbrsinf[nbr] += 1
 																end
@@ -1267,32 +1497,6 @@ module diffustion_sim
 						
 						#	Update recovery timer
 							inftime[ego_idx] -= 1
-					end
-				
-				#	Process new infections (already deduped)
-					if new_infections_cnt > 0
-						unique_new = @view new_infections_buf[1:new_infections_cnt]
-						
-						#	Find available slots
-							available_slots = findall(x -> x == -1, infected)
-							
-							if length(available_slots) >= new_infections_cnt
-								#	Add new infections
-									for (i, new_inf) in enumerate(unique_new)
-										infected[available_slots[i]] = new_inf
-										inftime[available_slots[i]] = rec_t
-									end
-								
-								#	Remove from susceptible lists
-									for i in 1:n
-										for new_inf in unique_new
-											idx = findfirst(x -> x == new_inf, s_alst[i])
-											if idx !== nothing
-												s_alst[i][idx] = 0
-											end
-										end
-									end
-							end
 					end
 				
 				#	Process recovery
@@ -1365,80 +1569,110 @@ module diffustion_sim
 	end
 	@doc raw"""
 	**Description**
-	Simulates an SIR/SIRS epidemic with social feedback mechanisms affecting contact rates.
-	Optimized implementation with pre-allocation and efficient buffer management.
+	Simulates an SIR/SIRS epidemic with social feedback mechanisms where contact rates 
+	are dynamically adjusted based on local and global infection prevalence. Implements
+	SAS PROC IML-compatible processing order with immediate infection updates.
 
 	**Usage**
 	`sirdif(alst, vlst, infectedp, inf_r, rec_t, maxtime, p_symp, b_int, b_close, b_cxn_peers, b_cxn_total, b_cxn_symp, b_cls_x_smp; transmission_method=:weighted, immunity_duration=nothing)`
 
 	**Arguments**
-	- `alst::Union{Matrix{Int}, Vector{Vector{Int}}}`: Adjacency structure (accepts both formats)
-	- `vlst::Union{Matrix{Float64}, Vector{Vector{Float64}}}`: Edge weights
+	- `alst::Union{Matrix{Int}, Vector{Vector{Int}}}`: Network adjacency structure (node connections)
+	- `vlst::Union{Matrix{Float64}, Vector{Vector{Float64}}}`: Edge weights (tie strengths)
 	- `infectedp::Vector{Int}`: Initial infected node indices
 	- `inf_r::Float64`: Base infection probability per contact (∈ [0,1])
-	- `rec_t::Int`: Recovery time in days (constant)
+	- `rec_t::Int`: Recovery time in days (constant for all individuals)
 	- `maxtime::Int`: Maximum simulation days
 	- `p_symp::Float64`: Probability of being symptomatic when infected (∈ [0,1])
-	- `b_int::Float64`: Baseline interaction level (intercept)
-	- `b_close::Float64`: Effect of edge weight on interaction
-	- `b_cxn_peers::Float64`: Effect of number of infected peers
-	- `b_cxn_total::Float64`: Effect of global infection prevalence
-	- `b_cxn_symp::Float64`: Effect of being symptomatic
-	- `b_cls_x_smp::Float64`: Interaction term (peers × symptomatic)
-	- `transmission_method::Symbol`: :simple or :weighted (default :weighted)
-	- `immunity_duration::Union{Int,Nothing}`: Days of immunity after recovery (nothing = permanent)
+	- `b_int::Float64`: Baseline interaction level (logit scale intercept)
+	- `b_close::Float64`: Effect of edge weight on interaction probability
+	- `b_cxn_peers::Float64`: Effect of number of infected peers on avoidance
+	- `b_cxn_total::Float64`: Effect of global infection prevalence on behavior
+	- `b_cxn_symp::Float64`: Effect of being symptomatic on reduced activity
+	- `b_cls_x_smp::Float64`: Interaction term (peers × symptomatic status)
+	- `transmission_method::Symbol`: `:simple` (ignores weights) or `:weighted` (default)
+	- `immunity_duration::Union{Int,Nothing}`: Days of immunity after recovery (`nothing` = permanent immunity for SIR model)
 
 	**Details**
-	The simulation implements SAS-aligned logic where:
-	- `nbrsinf[i]` tracks infection exposures for node i
-	- Updates occur when transmission happens
-	- No decrement on recovery (accumulative tracking)
+	The model implements epidemic spread with social feedback where individuals modify their 
+	contact behavior based on infection awareness. Edge activation probability is computed via:
 	
-	Matrix inputs are automatically converted to vector format for efficiency.
-	Pre-allocated buffers minimize memory allocation during simulation.
+	```
+	logit(p_activate) = b_int + b_cxn_symp*symptomatic + b_close*edgewgt + 
+	                    b_cxn_peers*peers_infected + b_cxn_total*(ninf/(n/3)) +
+	                    b_cls_x_smp*peers_infected*symptomatic
+	```
 	
-	When `immunity_duration` is set:
-	- Implements SIRS model with waning immunity
-	- Recovered individuals become susceptible after immunity period
-	- Enables multiple epidemic waves
+	For weighted transmission, the probability of infection given contact is:
+	`p_transmission = 1 - (1 - inf_r)^edgewgt`
+	
+	**Key Implementation Details:**
+	
+	1. **Immediate infection processing**: When transmission occurs, the newly infected node
+	   is immediately added to the infected list and removed from all susceptible neighbor
+	   lists within the same timestep, matching SAS PROC IML behavior.
+	
+	2. **Neighbor infection tracking**: The `nbrsinf` count tracks cumulative neighbor 
+	   infections without decrementing upon recovery. When node A infects node B, the 
+	   neighbors of A are notified that one more of their neighbors (B) is infected.
+	
+	3. **SAS compatibility**: Processing order and update logic match SAS PROC IML 
+	   implementations exactly, enabling direct comparison of simulation results.
+	
+	When `immunity_duration` is specified:
+	- Implements an SIRS model with temporary immunity
+	- Recovered individuals return to susceptible after immunity wanes
+	- Enables modeling of recurrent epidemic waves
 
 	**Value**
-	Returns a Dict{String, Any} containing:
-	- `"infection_log"`: Matrix{Float64} with columns:
-	  - [1] time
-	  - [2] n_infected
-	  - [3] prop_ever_infected
-	  - [4] prop_currently_infected
-	  - [5] n_recovered
-	  - [6] prop_recovered
-	  - [7] n_immune
-	- `"total_time"`: Float64 runtime in seconds
+	Returns a `Dict{String, Any}` containing:
+	- `"infection_log"`: `Matrix{Float64}` with columns:
+	  - [1] time: simulation day
+	  - [2] n_infected: current infected count
+	  - [3] prop_ever_infected: cumulative infection proportion
+	  - [4] prop_currently_infected: current infection proportion
+	  - [5] n_recovered: total recovered count
+	  - [6] prop_recovered: proportion recovered among ever-infected
+	  - [7] n_immune: count with immunity (recovered in SIR, immune in SIRS)
+	- `"total_time"`: `Float64` computation time in seconds
 
 	**Examples**
 	```julia
-	# Load network
-	network_data = sim_prep("network.graphml")
+	# Load network with SAS preprocessing for comparison
+	network_data = sim_prep("network.graphml", sas_transformation=true)
 	
-	# Standard SIR model (permanent immunity)
+	# Basic SIR model with social feedback
 	results = sirdif(network_data.alst, network_data.vlst, [1], 
 	                0.02, 14, 100, 0.75,
 	                -0.1, 1.0, -0.5, -3.5, -1.5, -0.1)
 	
-	# SIRS model with 30-day immunity
-	results = sirdif(network_data.alst, network_data.vlst, [1], 
-	                0.02, 14, 200, 0.75,
-	                -0.1, 1.0, -0.5, -3.5, -1.5, -0.1,
-	                immunity_duration=30)
-	
-	# Extract results
+	# Extract epidemic curve
 	infection_log = results["infection_log"]
+	peak_prevalence = maximum(infection_log[:, 4])
 	final_size = infection_log[end, 3]
-	println("Final epidemic size: ", round(final_size * 100, digits=1), "%")
+	
+	# SIRS model with 30-day immunity period
+	results_sirs = sirdif(network_data.alst, network_data.vlst, [1, 5], 
+	                     0.02, 14, 300, 0.75,
+	                     -0.1, 1.0, -0.5, -3.5, -1.5, -0.1,
+	                     immunity_duration=30)
+	
+	# Parameter sweep for comparison with SAS
+	for b_peer in [0.0, -0.5, -1.0]
+	    results = sirdif(network_data.alst, network_data.vlst, [1], 
+	                    0.02, 14, 200, 0.75,
+	                    -0.1, 1.0, b_peer, -3.5, -1.5, -0.1)
+	    println("Peer effect $b_peer: Final size $(results["infection_log"][end, 3])")
+	end
 	```
 
 	**See Also**
-	`transmission_prob` for transmission model details
-	`sim_prep` for network data preparation
+	`transmission_prob`, `sim_prep`, `replicate_sas_simulation`, `sas_simulation_comparer`
+
+	**References**
+	Based on behavioral epidemic models incorporating social feedback mechanisms.
+	Processing order and logic validated against SAS PROC IML implementations for 
+	direct comparability in epidemiological research.
 	""" sirdif
 
 #   Exporting Objects
