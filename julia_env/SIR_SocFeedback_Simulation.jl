@@ -1599,6 +1599,7 @@ using diffustion_sim
 			b_cls_x_smp  = 0.0
 			inf_r        = 1.0
 			tx_method    = :simple
+
 		#	Run: line (seed at node 1)
 			line_out = sirdif(
 				line_alst, line_vlst,
@@ -1607,7 +1608,10 @@ using diffustion_sim
 				transmission_method = tx_method,
 				immunity_duration   = nothing
 			)
+			colnames = [:time, :NI, :propeverinf, :propcurrinf, :NR, :proprec, :NImm]
 			line_log = line_out["infection_log"]
+			line_log_df = DataFrame(line_log, colnames)
+
 		#	Run: star (seed at node 1, the center)
 			star_out = sirdif(
 				star_alst, star_vlst,
@@ -1617,15 +1621,18 @@ using diffustion_sim
 				immunity_duration   = nothing
 			)
 			star_log = star_out["infection_log"]
+			star_log_df = DataFrame(star_log, colnames)
+
 		#	Light invariants
 			@assert size(line_log, 2) == 7 "line_log must have 7 columns"
 			@assert size(star_log, 2) == 7 "star_log must have 7 columns"
 			@assert line_log[1, 1] == 0.0 "first row is time 0 for line"
 			@assert star_log[1, 1] == 0.0 "first row is time 0 for star"
+
 		#	Return artifacts and params
 			return (
-				line_log = line_log,
-				star_log = star_log,
+				line_log = line_log_df,
+				star_log = star_log_df,
 				line_out = line_out,
 				star_out = star_out,
 				params = (
@@ -1655,5 +1662,511 @@ using diffustion_sim
 	line_log = res.line_log
 	star_log = res.star_log
 	params   = res.params
+	
+#	Test 2: Activation Probability Sweep (logit intercept only)
+	function test_activation_prob(; seed::Int=1234, maxtime::Int=6, rec_t::Int=14)
+		"""
+		Args:
+			seed::Int: RNG seed
+			maxtime::Int: simulation horizon (days)
+			rec_t::Int: days to recovery
+		Returns:
+			NamedTuple: (results::DataFrame, runs::Dict{String,Any}, params)
+		Notes:
+			Only the intercept `b_int` varies; everything else = 0.
+			Transmission is forced to succeed (`inf_r=1.0`, `transmission_method=:simple`)
+			so curves reflect activation probability alone.
+		"""
+		#	Seed
+			Random.seed!(seed)
+		#	Network (line of 5)
+			line_alst, line_vlst = build_line5()
+
+		#	Scenarios (low → mid → high activation)
+			scenarios = [
+				("low",  -3.0),   # logistic(-3)  ≈ 0.047
+				("mid",   0.0),   # logistic(0)   = 0.5
+				("high",  3.0)    # logistic(3)   ≈ 0.953
+			]
+
+		#	Fixed params
+			p_symp       = 0.0
+			b_close      = 0.0
+			b_cxn_peers  = 0.0
+			b_cxn_total  = 0.0
+			b_cxn_symp   = 0.0
+			b_cls_x_smp  = 0.0
+			inf_r        = 1.0
+			tx_method    = :simple
+
+		#	Run scenarios
+			colnames = [:time, :NI, :propeverinf, :propcurrinf, :NR, :proprec, :NImm]
+			dfs = DataFrame[]
+			runs = Dict{String,Any}()
+
+			for (label, b_int) in scenarios
+				out = sirdif(
+					line_alst, line_vlst,
+					[1], inf_r, rec_t, maxtime,
+					p_symp, b_int, b_close, b_cxn_peers, b_cxn_total, b_cxn_symp, b_cls_x_smp;
+					transmission_method = tx_method,
+					immunity_duration   = nothing
+				)
+				df = DataFrame(out["infection_log"], colnames)
+				df[!, :scenario] .= label
+				push!(dfs, df)
+				runs[label] = out
+			end
+
+		#	Bundle
+			all_df = vcat(dfs...)
+			return (results = all_df, runs = runs, params = (seed=seed, maxtime=maxtime, rec_t=rec_t))
+	end
+
+	res2 = test_activation_prob()
+	first(res2.results, 6)
+
+#	Test 3: Weighted vs Simple Transmission (same activation)
+	function test_weighted_vs_simple(; seed::Int=1234, maxtime::Int=6, rec_t::Int=14)
+		"""
+		Args:
+			seed::Int: RNG seed
+			maxtime::Int: simulation horizon (days)
+			rec_t::Int: days to recovery
+		Returns:
+			NamedTuple: (results::DataFrame, runs::Dict{Symbol,Any}, params)
+		Notes:
+			Same high activation across runs (b_int=8.0).
+			Compare :simple vs :weighted transmission on a star with one heavier edge.
+			We boost weight for edge (1,2) in both directions.
+		"""
+		#	Seed
+			Random.seed!(seed)
+		#	Network (star of 5)
+			star_alst, star_vlst = build_star5()
+		#	Heavier weight on (1,2) and reciprocal (2,1)
+			star_vw = copy(star_vlst)
+			star_vw[1, 2] = 3.0
+			star_vw[2, 2] = 3.0
+
+		#	Activation fixed high; moderate base infectivity
+			p_symp       = 0.0
+			b_int        = 8.0       # logistic(8) ≈ 0.9997 (edge almost always “on”)
+			b_close      = 0.0
+			b_cxn_peers  = 0.0
+			b_cxn_total  = 0.0
+			b_cxn_symp   = 0.0
+			b_cls_x_smp  = 0.0
+			inf_r        = 0.20
+
+		#	Run both methods
+			colnames = [:time, :NI, :propeverinf, :propcurrinf, :NR, :proprec, :NImm]
+			runs = Dict{Symbol,Any}()
+			dfs  = DataFrame[]
+
+		#	:simple (ignores weights)
+			out_simple = sirdif(
+				star_alst, star_vlst,
+				[1], inf_r, rec_t, maxtime,
+				p_symp, b_int, b_close, b_cxn_peers, b_cxn_total, b_cxn_symp, b_cls_x_smp;
+				transmission_method = :simple,
+				immunity_duration   = nothing
+			)
+			df_simple = DataFrame(out_simple["infection_log"], colnames)
+			df_simple[!, :method] .= :simple
+			push!(dfs, df_simple)
+			runs[:simple] = out_simple
+
+		#	:weighted (uses weights; (1,2) is 3.0 here)
+			out_weighted = sirdif(
+				star_alst, star_vw,
+				[1], inf_r, rec_t, maxtime,
+				p_symp, b_int, b_close, b_cxn_peers, b_cxn_total, b_cxn_symp, b_cls_x_smp;
+				transmission_method = :weighted,
+				immunity_duration   = nothing
+			)
+			df_weighted = DataFrame(out_weighted["infection_log"], colnames)
+			df_weighted[!, :method] .= :weighted
+			push!(dfs, df_weighted)
+			runs[:weighted] = out_weighted
+
+		#	Bundle
+			all_df = vcat(dfs...)
+			return (results = all_df, runs = runs, params = (seed=seed, maxtime=maxtime, rec_t=rec_t, inf_r=inf_r, b_int=b_int))
+	end
+
+	res3 = test_weighted_vs_simple()
+	first(res3.results, 6)
+
+#	Helper Function for Test 3 Sweep: set a single heavy edge in vlst
+	function set_heavy_edge!(vlst::Matrix{Float64}, alst::Matrix{Int}, ego::Int, alter::Int, w::Float64)
+		#	Scan neighbor columns (avoid findfirst in hot paths)
+			for j in 2:size(alst, 2)
+				if alst[ego, j] == alter
+					vlst[ego, j] = w
+					break
+				end
+			end
+			return nothing
+	end
+
+#	Test 3: Seed Sweep (Simple vs Weighted)
+	function run_test3_seed_sweep(; num_seeds::Int=300, maxtime::Int=6, rec_t::Int=14,
+		inf_r::Float64=0.2, b_int::Float64=8.0, heavy_w::Float64=3.0, base_seed::Int=1234)
+		#	Build base network (expects `build_line5()` available)
+			line_alst, line_vlst = build_line5()
+
+		#	Weighted copy with a single heavy edge (1↔2)
+			vlst_weighted = copy(line_vlst)
+			set_heavy_edge!(vlst_weighted, line_alst, 1, 2, heavy_w)
+			set_heavy_edge!(vlst_weighted, line_alst, 2, 1, heavy_w)
+
+		#	Shared parameters: isolate transmission kernel effects
+			p_symp      = 0.0
+			b_close     = 0.0
+			b_cxn_peers = 0.0
+			b_cxn_total = 0.0
+			b_cxn_symp  = 0.0
+			b_cls_x_smp = 0.0
+
+		#	Accumulator
+			rows = Vector{NamedTuple}(undef, 2*num_seeds)
+			ridx = 0
+
+		#	Sweep over seeds
+			for s in 1:num_seeds
+				#	Simple transmission
+					Random.seed!(base_seed + s)
+					out_s = sirdif(
+						line_alst, line_vlst, [1],
+						inf_r, rec_t, maxtime,
+						p_symp, b_int, b_close, b_cxn_peers, b_cxn_total, b_cxn_symp, b_cls_x_smp;
+						transmission_method = :simple,
+						immunity_duration   = nothing
+					)
+					log_s   = out_s["infection_log"]
+					final_s = log_s[end, :]
+					ever_s  = (final_s[2] + final_s[5]) / 5.0
+					#	Time to saturation (no findfirst in hot paths)
+					t_sat_s = begin
+						ts = missing
+						for t in 1:size(log_s, 1)
+							if log_s[t, 3] == 1.0
+								ts = log_s[t, 1]
+								break
+							end
+						end
+						ts
+					end
+					ridx += 1
+					rows[ridx] = (
+						seed           = s,
+						method         = :simple,
+						final_propever = log_s[end, 3],
+						final_NI       = log_s[end, 2],
+						final_NR       = log_s[end, 5],
+						saturated      = ever_s == 1.0,
+						t_saturate     = t_sat_s,
+					)
+
+				#	Weighted transmission (heavy edge 1↔2)
+					Random.seed!(base_seed + s)
+					out_w = sirdif(
+						line_alst, vlst_weighted, [1],
+						inf_r, rec_t, maxtime,
+						p_symp, b_int, b_close, b_cxn_peers, b_cxn_total, b_cxn_symp, b_cls_x_smp;
+						transmission_method = :weighted,
+						immunity_duration   = nothing
+					)
+					log_w   = out_w["infection_log"]
+					final_w = log_w[end, :]
+					ever_w  = (final_w[2] + final_w[5]) / 5.0
+					t_sat_w = begin
+						tw = missing
+						for t in 1:size(log_w, 1)
+							if log_w[t, 3] == 1.0
+								tw = log_w[t, 1]
+								break
+							end
+						end
+						tw
+					end
+					ridx += 1
+					rows[ridx] = (
+						seed           = s,
+						method         = :weighted,
+						final_propever = log_w[end, 3],
+						final_NI       = log_w[end, 2],
+						final_NR       = log_w[end, 5],
+						saturated      = ever_w == 1.0,
+						t_saturate     = t_sat_w,
+					)
+			end
+
+		#	Per-seed outcomes
+			results = DataFrame(rows)
+
+		#	Aggregated summary by method
+			g = DataFrames.groupby(results, :method)
+			summary = DataFrames.combine(
+				g,
+				DataFrames.nrow                                   => :n,
+				:final_propever   => Statistics.mean              => :mean_final_ever,
+				:final_propever   => Statistics.std               => :sd_final_ever,
+				:saturated        => (x -> Statistics.mean(Float64.(x))) => :pct_saturated,
+				:t_saturate       => (v -> begin
+					it = skipmissing(v)
+					c = 0; s = 0.0
+					for val in it; s += Float64(val); c += 1; end
+					c == 0 ? missing : s / c
+				end) => :mean_t_saturate,
+				:t_saturate       => (v -> begin
+					vec = collect(skipmissing(v))
+					length(vec) == 0 ? missing : Statistics.median(vec)
+				end) => :median_t_saturate,
+			)
+
+		#	Return
+			return (results = results, summary = summary)
+	end
+
+	sweep = run_test3_seed_sweep(; num_seeds=500, maxtime=6, rec_t=14, inf_r=0.2, b_int=8.0, heavy_w=3.0, base_seed=1234)
+	println(sweep.summary)
+	first(sweep.results, 10)
+
+#	Testing Random Functions: Equivalent Order
+	function test_tranprob_equivalence_single_u(; inf_r::Float64=0.2, seed::Int=1234, edges::Int=4, trials::Int=3)
+		"""
+		Args:
+			inf_r::Float64: base per-contact transmission probability
+			seed::Int: RNG seed
+			edges::Int: number of edges to “test” per trial
+			trials::Int: number of repeated trials
+		Returns:
+			NamedTuple: (all_probs_equal::Bool, all_decisions_equal::Bool, mismatches::Int)
+		Notes:
+			For unit weight (edgwgt = 1), SAS/Julia formula gives:
+			- simple:   p_s = inf_r
+			- weighted: p_w = 1 - (1 - inf_r)^1 = inf_r
+			We assert p_s == p_w (within tiny ε), then use the *same* u ~ U(0,1)
+			for both decisions. Decisions must match for every edge across all trials.
+		"""
+		#	Seed RNG
+			Random.seed!(seed)
+		#	Init counters
+			prob_ok      = true
+			decisions_ok = true
+			mismatches   = 0
+		#	Run trials
+			for t in 1:trials
+				for e in 1:edges
+					p_s = inf_r
+					p_w = 1.0 - (1.0 - inf_r)^1.0
+					prob_ok &= isapprox(p_s, p_w; atol=1e-12, rtol=0.0)
+					u = rand()
+					dec_s = u < p_s
+					dec_w = u < p_w
+					if dec_s != dec_w
+						decisions_ok = false
+						mismatches  += 1
+					end
+				end
+			end
+		#	Return
+			return (all_probs_equal = prob_ok, all_decisions_equal = decisions_ok, mismatches = mismatches)
+	end
+
+	res1 = test_tranprob_equivalence_single_u(; inf_r=0.2, seed=42, edges=4, trials=10)
+
+#	Separate Draws
+	function demo_rng_path_effect_separate_u(; inf_r::Float64=0.2, seed::Int=1234, edges::Int=4, trials::Int=3)
+		"""
+		Args:
+			inf_r::Float64: base per-contact transmission probability
+			seed::Int: RNG seed
+			edges::Int: number of edges to “test” per trial
+			trials::Int: number of repeated trials
+		Returns:
+			NamedTuple: (probabilities_equal::Bool, any_decision_divergence::Bool, divergence_count::Int)
+		Notes:
+			Here p_s == p_w (unit weight), but we draw *independent* u_s and u_w.
+			Outcomes can differ purely from RNG path, even though probabilities match.
+		"""
+		#	Seed RNG
+			Random.seed!(seed)
+		#	Init counters
+			prob_ok    = true
+			diverge    = false
+			div_count  = 0
+		#	Run trials
+			for t in 1:trials
+				for e in 1:edges
+					p_s = inf_r
+					p_w = 1.0 - (1.0 - inf_r)^1.0
+					prob_ok &= isapprox(p_s, p_w; atol=1e-12, rtol=0.0)
+					u_s = rand()
+					u_w = rand()
+					dec_s = u_s < p_s
+					dec_w = u_w < p_w
+					if dec_s != dec_w
+						diverge   = true
+						div_count += 1
+					end
+				end
+			end
+		#	Return
+			return (probabilities_equal = prob_ok, any_decision_divergence = diverge, divergence_count = div_count)
+	end
+
+	res2 = demo_rng_path_effect_separate_u(; inf_r=0.2, seed=42, edges=4, trials=10)
+	@show res1, res2
+
+#	Test 4: Unit Test — Symptomatic extremes (p_symp ∈ {0,1})
+	function test_symptomatic_extremes_star(; seed::Int=1234, maxtime::Int=10, rec_t::Int=14)
+		"""
+		Args:
+			seed::Int: RNG seed
+			maxtime::Int: simulation horizon (days)
+			rec_t::Int: days to recovery
+		Returns:
+			NamedTuple: (results::DataFrame, runs::Dict, params::NamedTuple)
+		Notes:
+			Star network, seed at center (1). We compare p_symp=0 vs p_symp=1 with a large *negative*
+			`b_cxn_symp` so symptoms strongly *suppress* activation. If symptomatic is applied as intended,
+			`p_symp=1` should show minimal spread while `p_symp=0` should spread readily.
+		"""
+		#	Build network (assumes build_star5 is available)
+			star_alst, star_vlst = build_star5()
+		#	Shared params (moderate baseline so suppression is visible)
+			b_int        = 2.0
+			b_close      = 0.0
+			b_cxn_peers  = 0.0
+			b_cxn_total  = 0.0
+			b_cls_x_smp  = 0.0
+			b_cxn_symp   = -10.0	# strong suppression when symptomatic
+			inf_r        = 0.5
+			tx_method    = :simple
+
+		#	Run p_symp = 0.0 (never symptomatic)
+			Random.seed!(seed)
+			out0 = sirdif(
+				star_alst, star_vlst,
+				[1], inf_r, rec_t, maxtime,
+				0.0, b_int, b_close, b_cxn_peers, b_cxn_total, b_cxn_symp, b_cls_x_smp;
+				transmission_method = tx_method,
+				immunity_duration   = nothing
+			)
+
+		#	Run p_symp = 1.0 (always symptomatic)
+			Random.seed!(seed)
+			out1 = sirdif(
+				star_alst, star_vlst,
+				[1], inf_r, rec_t, maxtime,
+				1.0, b_int, b_close, b_cxn_peers, b_cxn_total, b_cxn_symp, b_cls_x_smp;
+				transmission_method = tx_method,
+				immunity_duration   = nothing
+			)
+
+		#	Assemble labeled results
+			colnames = [:time, :NI, :propeverinf, :propcurrinf, :NR, :proprec, :NImm]
+			df0 = DataFrame(out0["infection_log"], colnames); df0.:scenario .= "p_symp=0"
+			df1 = DataFrame(out1["infection_log"], colnames); df1.:scenario .= "p_symp=1"
+			results = vcat(df0, df1)
+
+		#	Return
+			return (
+				results = results,
+				runs    = Dict("p_symp=0" => out0, "p_symp=1" => out1),
+				params  = (seed=seed, maxtime=maxtime, rec_t=rec_t, b_int=b_int, b_cxn_symp=b_cxn_symp, inf_r=inf_r, tx_method=tx_method)
+			)
+	end
+
+#	Test 5: Unit Test — Symptomatic mixed (p_symp = 0.75) sensitivity sweep
+	function test_symptomatic_mixed_star_sweep(; nseeds::Int=200, maxtime::Int=10, rec_t::Int=14)
+		"""
+		Args:
+			nseeds::Int: number of seeds to sweep
+			maxtime::Int: simulation horizon (days)
+			rec_t::Int: days to recovery
+		Returns:
+			NamedTuple: (results::DataFrame, summary::DataFrame, params::NamedTuple)
+		Notes:
+			Star network, seed at center (1). We hold all coefficients fixed and compare three levels:
+			p_symp ∈ {0.0, 0.75, 1.0}. With large negative `b_cxn_symp`, the *final ever infected* should
+			monotonically decrease as p_symp increases. We aggregate final stats across seeds.
+		"""
+		#	Build network
+			star_alst, star_vlst = build_star5()
+		#	Params (same as extremes test to isolate symptomatic effect)
+			b_int        = 2.0
+			b_close      = 0.0
+			b_cxn_peers  = 0.0
+			b_cxn_total  = 0.0
+			b_cls_x_smp  = 0.0
+			b_cxn_symp   = -10.0
+			inf_r        = 0.5
+			tx_method    = :simple
+
+		#	Run sweep over seeds × p_symp levels
+			levels = [0.0, 0.75, 1.0]
+			rows = Vector{NamedTuple}(undef, nseeds * length(levels))
+			ptr = 0
+			for p_symp in levels
+				for s in 1:nseeds
+					Random.seed!(s)
+					out = sirdif(
+						star_alst, star_vlst,
+						[1], inf_r, rec_t, maxtime,
+						p_symp, b_int, b_close, b_cxn_peers, b_cxn_total, b_cxn_symp, b_cls_x_smp;
+						transmission_method = tx_method,
+						immunity_duration   = nothing
+					)
+					log = out["infection_log"]
+					final = log[end, :]
+					ptr += 1
+					rows[ptr] = (
+						seed           = s,
+						p_symp         = p_symp,
+						final_propever = final[3],
+						final_NI       = final[2],
+						final_NR       = final[5],
+						saturated      = final[3] ≈ 1.0
+					)
+				end
+			end
+
+		#	Tidy results + summary
+			results = DataFrame(rows)
+			g = groupby(results, :p_symp)
+			summary = combine(
+				g,
+				nrow              => :n,
+				:final_propever   => mean => :mean_final_ever,
+				:final_propever   => std  => :sd_final_ever,
+				:saturated        => x -> mean(Float64.(x)) => :pct_saturated
+			)
+
+		#	Return
+			return (
+				results = results,
+				summary = summary,
+				params  = (nseeds=nseeds, maxtime=maxtime, rec_t=rec_t, b_int=b_int, b_cxn_symp=b_cxn_symp, inf_r=inf_r, tx_method=tx_method)
+			)
+	end
+
+# Test A: extremes
+	ext = test_symptomatic_extremes_star()
+	first(ext.results, 6), last(ext.results, 6), ext.params
+
+	combine(groupby(ext.results, :scenario), :propeverinf => last => :final_ever)
+
+# 	Test B: mixed sweep
+	mx = test_symptomatic_mixed_star_sweep(nseeds=200)
+	mx.summary
+	first(mx.results, 9)
+
+
+
+
 
 
