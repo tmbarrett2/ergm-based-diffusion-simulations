@@ -1266,414 +1266,277 @@ module diffustion_sim
 			return (alst_vec, vlst_vec)
 	end
 
-#	Helper Function for sirdif: simple transmission probability
-	function _transmission_simple(inf_r::Float64, edgwgt::Float64)
-		"""
-		Args:
-			inf_r::Float64: base infection rate
-			edgwgt::Float64: edge weight (unused in simple model)
-		Returns:
-			Int: 1 if transmission occurs, 0 otherwise
-		Notes:
-			Simple binomial transmission ignoring edge weights.
-		"""
-		
-		#	Simple transmission
-			return rand() < inf_r ? 1 : 0
-	end
-
-#	Helper Function for sirdif: edge-weighted transmission probability
-	function _transmission_weighted(inf_r::Float64, edgwgt::Float64)
-		"""
-		Args:
-			inf_r::Float64: base infection rate
-			edgwgt::Float64: edge weight modifying transmission
-		Returns:
-			Int: 1 if transmission occurs, 0 otherwise
-		Notes:
-			Transmission probability increases with edge weight.
-			Formula: p = 1 - (1 - inf_r)^edgwgt
-		"""
-		
-		#	Calculate edge-weight-adjusted probability
-			tranprob = 1.0 - (1.0 - inf_r)^edgwgt
-			
-		#	Return transmission outcome
-			return rand() < tranprob ? 1 : 0
-	end
-
-#	Developer Function: transmission probability with configurable method
-	function transmission_prob(inf_r::Float64, edgwgt::Float64; method::Symbol=:weighted)
-		"""
-		Args:
-			inf_r::Float64: base infection rate
-			edgwgt::Float64: edge weight
-			method::Symbol: :simple or :weighted (default :weighted)
-		Returns:
-			Int: 1 if transmission occurs, 0 otherwise
-		Notes:
-			Wrapper function selecting transmission method.
-		"""
-		
-		#	Select transmission method
-			if method == :simple
-				return _transmission_simple(inf_r, edgwgt)
-			elseif method == :weighted
-				return _transmission_weighted(inf_r, edgwgt)
-			else
-				error("Unknown transmission method: $method. Use :simple or :weighted")
-			end
-	end
-
 #	SIR Diffusion Simulation with Social Feedback
-	function sirdif(alst::Union{Matrix{Int}, Vector{Vector{Int}}}, 
-	                vlst::Union{Matrix{Float64}, Vector{Vector{Float64}}}, 
-	                infectedp::Vector{Int}, inf_r::Float64, rec_t::Int, 
-	                maxtime::Int, p_symp::Float64, b_int::Float64, 
-	                b_close::Float64, b_cxn_peers::Float64, b_cxn_total::Float64, 
-	                b_cxn_symp::Float64, b_cls_x_smp::Float64;
-	                transmission_method::Symbol=:weighted,
-	                immunity_duration::Union{Int,Nothing}=nothing)
-		"""
-		Args:
-			alst::Union{Matrix{Int}, Vector{Vector{Int}}}: adjacency list (matrix or vector format)
-			vlst::Union{Matrix{Float64}, Vector{Vector{Float64}}}: edge weights
-			infectedp::Vector{Int}: initial infected node indices
-			inf_r::Float64: base infection rate
-			rec_t::Int: recovery time in days
-			maxtime::Int: maximum simulation time
-			p_symp::Float64: probability of being symptomatic when infected
-			b_int::Float64: intercept parameter
-			b_close::Float64: effect of edge weight on interaction
-			b_cxn_peers::Float64: effect of infected peers
-			b_cxn_total::Float64: effect of global infection level
-			b_cxn_symp::Float64: effect of being symptomatic
-			b_cls_x_smp::Float64: interaction term (peers × symptomatic)
-			transmission_method::Symbol: :simple or :weighted (default :weighted)
-			immunity_duration::Union{Int,Nothing}: days of immunity after recovery (nothing = permanent)
-		Returns:
-			Dict{String, Any}: infection_log and total_time
-		Notes:
-			SAS-aligned processing: immediate infection updates within timestep.
-			Updates nbrsinf for ego's neighbors when alter gets infected.
-		"""
-		
-		#	Convert matrix input to vector format if needed
-			if isa(alst, Matrix{Int})
-				alst, vlst = matrix_to_vector_adjacency(alst, vlst)
+	function sirdif(
+		alst::Union{Matrix{Int}, Vector{Vector{Int}}},
+		vlst::Union{Matrix{Float64}, Vector{Vector{Float64}}},
+		infectedp::Vector{Int}, inf_r::Float64, rec_t::Int,
+		maxtime::Int, p_symp::Float64, b_int::Float64,
+		b_close::Float64, b_cxn_peers::Float64, b_cxn_total::Float64,
+		b_cxn_symp::Float64, b_cls_x_smp::Float64;
+		transmission_method::Symbol = :weighted,
+		immunity_duration::Union{Int,Nothing} = nothing
+	)
+		#	Cache n from the input (SAS-aligned)
+			if alst isa Matrix{Int}
+				n_nodes = size(alst, 1)
+			else
+				n_nodes = length(alst)
 			end
-		
+
+		#	Matrix → vector-of-vectors (drop zeros), collect ids
+			if alst isa Matrix{Int}
+				alst_vec   = Vector{Vector{Int}}(undef, n_nodes)
+				vlst_vec   = Vector{Vector{Float64}}(undef, n_nodes)
+				unique_ids = Vector{Int}(undef, n_nodes)
+				@inbounds for i in 1:n_nodes
+					ego_id        = alst[i, 1]
+					unique_ids[i] = ego_id
+					row_ids       = alst[i, 2:end]
+					row_wgts      = vlst[i, 2:end]
+					nz_mask       = row_ids .> 0
+					neighbors     = row_ids[nz_mask]
+					weights       = row_wgts[nz_mask]
+					alst_vec[i]   = [ego_id; neighbors]
+					vlst_vec[i]   = [Float64(ego_id); weights]
+				end
+			else
+				alst_vec   = Vector{Vector{Int}}(undef, n_nodes)
+				vlst_vec   = Vector{Vector{Float64}}(undef, n_nodes)
+				@inbounds for i in 1:n_nodes
+					alst_vec[i] = alst[i]
+					vlst_vec[i] = vlst[i]
+				end
+				unique_ids = Vector{Int}(undef, n_nodes)
+				@inbounds for i in 1:n_nodes
+					unique_ids[i] = alst_vec[i][1]
+				end
+			end
+
+		#	Id → row index
+			id_to_idx = Dict{Int,Int}(unique_ids[i] => i for i in 1:n_nodes)
+
 		#	Start timing
 			start_time = time()
-		
-		#	Initialize simulation state
-			n = length(alst)
-			
-		#	Pre-allocate infection tracking arrays
-			infected = fill(-1, n)
-			inftime = zeros(Int, n)
-			nbrsinf = zeros(Int, n)
-			recovered = fill(false, n)
-			immunity_timer = zeros(Int, n)
-			
-		#	Initialize with seed infections
-			n_initial = length(infectedp)
-			infected[1:n_initial] = infectedp
-			inftime[1:n_initial] .= rec_t
-			
-		#	Create modifiable copy of adjacency list
-			s_alst = deepcopy(alst)
-			
-		#	Count initial infected neighbors (SAS logic)
-			for idx in 1:n_initial
-				inf_node = infectedp[idx]
-				nbrs = s_alst[inf_node]
-				for nbr in nbrs
-					if nbr > 0
-						nbrsinf[nbr] += 1
-					end
-				end
-			end
-			
-		#	Remove initially infected from susceptible lists
-			for i in 1:n
-				for inf_node in infectedp
-					idx = findfirst(x -> x == inf_node, s_alst[i])
-					if idx !== nothing
-						s_alst[i][idx] = 0
-					end
-				end
-			end
-		
-		#	Initialize time series storage
-			timesum = Matrix{Float64}(undef, 0, 7)
-			pinf = n_initial / n
-			timesum = vcat(timesum, [0.0 n_initial pinf 0.0 0.0 0.0 0.0])
-			total_recovered = 0
-		
-		#	Pre-allocate buffer for tracking new infections
-			new_infections_buf = Vector{Int}(undef, n)
-			new_infections_cnt = 0
-			
-		#	Main simulation loop
-			for t in 1:maxtime
-				#	Reset new infections counter
-					new_infections_cnt = 0
-					
-				#	Get currently infected at start of timestep
-					current_infected = infected[infected .> 0]
-					ninf = length(current_infected)
-					
-				#	Check if epidemic ended
-					if ninf == 0
-						break
-					end
-				
-				#	Process each infected individual
-					for j in 1:ninf
-						ego = current_infected[j]
-						ego_idx = findfirst(x -> x == ego, infected)
-						
-						#	Determine if symptomatic
-							issymptomatic = rand() < p_symp ? 1 : 0
-						
-						#	Get susceptible neighbors from s_alst
-							jnbr_indices = findall(x -> x > 0, s_alst[ego])
-							
-							if !isempty(jnbr_indices)
-								#	Process each susceptible neighbor
-									for idx in jnbr_indices
-										#	Isolating Inputs
-											alter = s_alst[ego][idx]
-											edgwgt = vlst[ego][idx]
-											peersinf = nbrsinf[alter]
-											
-										#	Calculate activation probability
-											lwact = b_int + 
-											       (issymptomatic * b_cxn_symp) +
-											       (b_close * edgwgt) +
-											       (b_cxn_peers * peersinf) +
-											       (b_cxn_total * (ninf / (n/3))) +
-											       (b_cls_x_smp * peersinf * issymptomatic)
-											
-											prob_act = exp(lwact) / (1 + exp(lwact))
-											
-										#   Determine if edge activates
-											if rand() < prob_act
-												#   Check transmission
-													if transmission_prob(inf_r, edgwgt; method=transmission_method) == 1
-														#   IMMEDIATE PROCESSING (SAS-style)
-														#   Track new infection
-															new_infections_cnt += 1
-															new_infections_buf[new_infections_cnt] = alter
-															
-														#   Find first available slot and add immediately
-															avail_slot = findfirst(x -> x == -1, infected)
-															if avail_slot !== nothing
-																infected[avail_slot] = alter
-																inftime[avail_slot] = rec_t
-															end
 
-														#   Remove alter from ALL susceptible lists immediately
-															@inbounds for r in 1:n
-																idx_r = findfirst(x -> x == alter, s_alst[r])
-																if idx_r !== nothing
-																	s_alst[r][idx_r] = 0
-																end
-															end
-															
-														#   Update nbrsinf for EGO's neighbors (SAS logic)
-														#   This tells ego's neighbors that one more of their neighbors (alter) is infected
-															ego_nbrs = alst[ego]
-															for nbr in ego_nbrs
-																if nbr > 0
-																	nbrsinf[nbr] += 1
-																end
-															end
-													end
-											end
-									end
-							end
-						
-						#	Update recovery timer
-							inftime[ego_idx] -= 1
+		#	State matrix: [id, I, S, R, t_rec, nbrsinf]
+			state = zeros(Int, n_nodes, 6)
+			@inbounds begin
+				state[:, 1] .= unique_ids
+				state[:, 3] .= 1
+			end
+
+		#	Column indices
+			ID_COL               = 1
+			INFECTED_COL         = 2
+			SUSCEPTIBLE_COL      = 3
+			RECOVERED_COL        = 4
+			TIME_TO_RECOVERY_COL = 5
+			NBRSINF_COL          = 6
+
+		#	Seed infections
+			@inbounds for inf_id in infectedp
+				idx = id_to_idx[inf_id]
+				state[idx, INFECTED_COL]         = 1
+				state[idx, SUSCEPTIBLE_COL]      = 0
+				state[idx, TIME_TO_RECOVERY_COL] = rec_t
+			end
+
+		#	Initial neighbor exposure (before S-list pruning)
+			@inbounds for i in 1:n_nodes
+				ego_id  = alst_vec[i][1]
+				ego_row = id_to_idx[ego_id]
+				if state[ego_row, INFECTED_COL] == 1
+					for alter_id in @view alst_vec[i][2:end]
+						alter_idx = id_to_idx[alter_id]
+						state[alter_idx, NBRSINF_COL] += 1
 					end
-				
-				#	Process recovery
-					recovered_mask = (inftime .== 0) .& (infected .> 0)
-					n_recovered = count(recovered_mask)
-					
-					if n_recovered > 0
-						#	Mark as recovered
-							recovered[recovered_mask] .= true
-							total_recovered += n_recovered
-							
-						#	Set immunity timer if applicable
-							if immunity_duration !== nothing
-								immunity_timer[recovered_mask] .= immunity_duration
-							end
-							
-						#	Clear from infected list
-							infected[recovered_mask] .= -1
-							inftime[recovered_mask] .= 0
+				end
+			end
+
+		#	Time series (t=0)
+			timesum   = Matrix{Float64}(undef, 0, 7)
+			n_initial = length(infectedp)
+			pinf      = n_initial / n_nodes
+			timesum   = vcat(timesum, [0.0 n_initial pinf 0.0 0.0 0.0 0.0])
+
+		#	Scratch
+			new_infections_cnt = 0
+
+		#	Main loop
+			@inbounds for t in 1:maxtime
+				new_infections_cnt = 0
+
+			#	Current infected (for global term)
+				ninf = 0
+				for i in 1:n_nodes
+					ninf += state[i, INFECTED_COL]
+				end
+
+			#	Padding if epidemic ended
+				if ninf == 0
+					NR_now = 0
+					for i in 1:n_nodes
+						NR_now += state[i, RECOVERED_COL]
 					end
-				
-				#	Process waning immunity (SIRS model)
-					if immunity_duration !== nothing
-						#	Decrement immunity timers
-							immunity_timer[immunity_timer .> 0] .-= 1
-							
-						#	Find those becoming susceptible again
-							becoming_susceptible = findall(i -> (immunity_timer[i] == 0) && recovered[i], 1:n)
-							
-							if !isempty(becoming_susceptible)
-								for node in becoming_susceptible
-									#	Mark as susceptible again
-										recovered[node] = false
-										
-									#	Add back to neighbor lists
-										for i in 1:n
-											if node in alst[i] && !(node in s_alst[i])
-												zero_idx = findfirst(x -> x == 0, s_alst[i])
-												if zero_idx !== nothing
-													s_alst[i][zero_idx] = node
-												end
-											end
-										end
+					ever_now      = NR_now
+					prop_ever_now = ever_now == 0 ? 0.0 : ever_now / n_nodes
+					prop_rec_now  = ever_now == 0 ? 0.0 : 1.0
+					for tt in t:maxtime
+						timesum = vcat(timesum, [Float64(tt) 0.0 prop_ever_now 0.0 NR_now prop_rec_now NR_now])
+					end
+					break
+				end
+
+			#	Per-ego infection attempts
+				for ego_idx in 1:n_nodes
+					if state[ego_idx, INFECTED_COL] != 1
+						continue
+					end
+
+					neighbors = alst_vec[ego_idx]
+					weights   = vlst_vec[ego_idx]
+					issympt   = rand() < p_symp ? 1 : 0
+
+				#	Scan susceptible alters (skip ego at position 1)
+					for (alter_id, edgwgt) in zip(@view(neighbors[2:end]), @view(weights[2:end]))
+						alter_idx = id_to_idx[alter_id]
+						if state[alter_idx, SUSCEPTIBLE_COL] != 1
+							continue
+						end
+
+						peersinf = state[alter_idx, NBRSINF_COL]
+
+					#	SAS-aligned activation
+						lwact    = b_int +
+						           (issympt * b_cxn_symp) +
+						           (b_close * edgwgt) +
+						           (b_cxn_peers * peersinf) +
+						           (b_cxn_total * (ninf / (n_nodes / 3))) +
+						           (b_cls_x_smp * peersinf * issympt)
+						prob_act = exp(lwact) / (1 + exp(lwact))
+
+						if rand() < prob_act
+						#	SAS transmission probability
+							tranprob = transmission_method === :weighted ?
+							           (1 - (1 - inf_r)^edgwgt) : inf_r
+							if rand() < tranprob
+								state[alter_idx, INFECTED_COL]         = 1
+								state[alter_idx, SUSCEPTIBLE_COL]      = 0
+								state[alter_idx, TIME_TO_RECOVERY_COL] = rec_t
+								new_infections_cnt += 1
+
+							#	Update nbrsinf for ego’s neighbors
+								for nbr_id in @view neighbors[2:end]
+									nbr_idx = id_to_idx[nbr_id]
+									state[nbr_idx, NBRSINF_COL] += 1
 								end
 							end
+						end
 					end
-				
-				#	Calculate epidemic metrics
-					current_infected_count = sum(infected .> 0)
-					NI = current_infected_count
-					NR = total_recovered
-					NImm = immunity_duration === nothing ? NR : sum(recovered)
-					
-					prop_ever_inf = (NI + NR) / n
-					prop_cur_inf = NI / n
-					prop_rec = NR > 0 ? NR / (NI + NR) : 0.0
-					
-				#	Record time step
-					timesum = vcat(timesum, [Float64(t) NI prop_ever_inf prop_cur_inf NR prop_rec NImm])
+
+				#	Recovery countdown
+					state[ego_idx, TIME_TO_RECOVERY_COL] -= 1
+				end
+
+			#	Move to recovered
+				for i in 1:n_nodes
+					if state[i, TIME_TO_RECOVERY_COL] == 0 && state[i, INFECTED_COL] == 1
+						state[i, INFECTED_COL]         = 0
+						state[i, RECOVERED_COL]        = 1
+						state[i, TIME_TO_RECOVERY_COL] = 0
+						if immunity_duration !== nothing
+							state[i, TIME_TO_RECOVERY_COL] = -immunity_duration
+						end
+					end
+				end
+
+			#	SIRS waning immunity
+				if immunity_duration !== nothing
+				#	Tick immunity timers (negative → 0)
+					for i in 1:n_nodes
+						if state[i, TIME_TO_RECOVERY_COL] < 0 && state[i, RECOVERED_COL] == 1
+							state[i, TIME_TO_RECOVERY_COL] += 1
+						end
+					end
+				#	When timer hits 0 while recovered → back to susceptible
+					for i in 1:n_nodes
+						if state[i, TIME_TO_RECOVERY_COL] == 0 && state[i, RECOVERED_COL] == 1
+							state[i, RECOVERED_COL]   = 0
+							state[i, SUSCEPTIBLE_COL] = 1
+						end
+					end
+				end
+
+			#	State consistency
+				for i in 1:n_nodes
+					sum_row = state[i, INFECTED_COL] + state[i, SUSCEPTIBLE_COL] + state[i, RECOVERED_COL]
+					@assert sum_row == 1 "Invalid state for node $(state[i, ID_COL]): I=$(state[i,2]) S=$(state[i,3]) R=$(state[i,4])"
+				end
+
+			#	Metrics and record
+				NI = 0; NR = 0
+				for i in 1:n_nodes
+					NI += state[i, INFECTED_COL]
+					NR += state[i, RECOVERED_COL]
+				end
+				prop_ever = (NI + NR) / n_nodes
+				prop_cur  = NI / n_nodes
+				prop_rec  = (NI + NR) > 0 ? NR / (NI + NR) : 0.0
+
+				timesum = vcat(timesum, [Float64(t) NI prop_ever prop_cur NR prop_rec NR])
 			end
-		
-		#	Calculate total time
+
+		#	Elapsed time
 			total_time = time() - start_time
-		
-		#	Return results
-			return Dict{String, Any}(
+
+		#	Return
+			return Dict{String,Any}(
 				"infection_log" => timesum,
-				"total_time" => total_time
+				"total_time"    => total_time,
+				"final_state"   => state,
 			)
 	end
 	@doc raw"""
-	**Description**
-	Simulates an SIR/SIRS epidemic with social feedback mechanisms where contact rates 
-	are dynamically adjusted based on local and global infection prevalence. Implements
-	SAS PROC IML-compatible processing order with immediate infection updates.
+	**Description**  
+	Simulates SIR/SIRS diffusion with *state-matrix* bookkeeping and SAS-aligned social feedback:
+	activation depends on symptoms, tie weight, infected peers, and a global prevalence term.
 
-	**Usage**
+	**Usage**  
 	`sirdif(alst, vlst, infectedp, inf_r, rec_t, maxtime, p_symp, b_int, b_close, b_cxn_peers, b_cxn_total, b_cxn_symp, b_cls_x_smp; transmission_method=:weighted, immunity_duration=nothing)`
 
 	**Arguments**
-	- `alst::Union{Matrix{Int}, Vector{Vector{Int}}}`: Network adjacency structure (node connections)
-	- `vlst::Union{Matrix{Float64}, Vector{Vector{Float64}}}`: Edge weights (tie strengths)
-	- `infectedp::Vector{Int}`: Initial infected node indices
-	- `inf_r::Float64`: Base infection probability per contact (∈ [0,1])
-	- `rec_t::Int`: Recovery time in days (constant for all individuals)
-	- `maxtime::Int`: Maximum simulation days
-	- `p_symp::Float64`: Probability of being symptomatic when infected (∈ [0,1])
-	- `b_int::Float64`: Baseline interaction level (logit scale intercept)
-	- `b_close::Float64`: Effect of edge weight on interaction probability
-	- `b_cxn_peers::Float64`: Effect of number of infected peers on avoidance
-	- `b_cxn_total::Float64`: Effect of global infection prevalence on behavior
-	- `b_cxn_symp::Float64`: Effect of being symptomatic on reduced activity
-	- `b_cls_x_smp::Float64`: Interaction term (peers × symptomatic status)
-	- `transmission_method::Symbol`: `:simple` (ignores weights) or `:weighted` (default)
-	- `immunity_duration::Union{Int,Nothing}`: Days of immunity after recovery (`nothing` = permanent immunity for SIR model)
+	- `alst::Union{Matrix{Int}, Vector{Vector{Int}}}`: Adjacency. If matrix, col 1 is id; remaining columns are neighbor ids (0 for none).  
+	- `vlst::Union{Matrix{Float64}, Vector{Vector{Float64}}}`: Edge weights aligned to `alst`.  
+	- `infectedp::Vector{Int}`: Seed node ids.  
+	- `inf_r::Float64`: Base transmission probability per active contact.  
+	- `rec_t::Int`: Days to recovery (constant).  
+	- `maxtime::Int`: Simulation horizon (days).  
+	- `p_symp::Float64`: Probability an infected ego is symptomatic in a time step.  
+	- `b_int, b_close, b_cxn_peers, b_cxn_total, b_cxn_symp, b_cls_x_smp`: Coefficients for the activation logit.  
+	- `transmission_method::Symbol`: `:weighted` (default) uses `1 - (1 - inf_r)^edgwgt`; `:simple` ignores `edgwgt`.  
+	- `immunity_duration::Union{Int,Nothing}`: If set, recovered nodes are immune for that many days (SIRS).
 
 	**Details**
-	The model implements epidemic spread with social feedback where individuals modify their 
-	contact behavior based on infection awareness. Edge activation probability is computed via:
-	
-	```
-	logit(p_activate) = b_int + b_cxn_symp*symptomatic + b_close*edgewgt + 
-	                    b_cxn_peers*peers_infected + b_cxn_total*(ninf/(n/3)) +
-	                    b_cls_x_smp*peers_infected*symptomatic
-	```
-	
-	For weighted transmission, the probability of infection given contact is:
-	`p_transmission = 1 - (1 - inf_r)^edgewgt`
-	
-	**Key Implementation Details:**
-	
-	1. **Immediate infection processing**: When transmission occurs, the newly infected node
-	   is immediately added to the infected list and removed from all susceptible neighbor
-	   lists within the same timestep, matching SAS PROC IML behavior.
-	
-	2. **Neighbor infection tracking**: The `nbrsinf` count tracks cumulative neighbor 
-	   infections without decrementing upon recovery. When node A infects node B, the 
-	   neighbors of A are notified that one more of their neighbors (B) is infected.
-	
-	3. **SAS compatibility**: Processing order and update logic match SAS PROC IML 
-	   implementations exactly, enabling direct comparison of simulation results.
-	
-	When `immunity_duration` is specified:
-	- Implements an SIRS model with temporary immunity
-	- Recovered individuals return to susceptible after immunity wanes
-	- Enables modeling of recurrent epidemic waves
+	- State matrix columns: `[id, infected, susceptible, recovered, time_to_recovery, nbrsinf]`.  
+	- Global term scales as `b_cxn_total * (ninf / (n/3))`, where `n` is the network size derived from `alst`.  
+	- New infections are applied immediately; they **do not** act as infectors until the next time step.  
+	- Matrix inputs are converted to vector form with the ego id in position 1; neighbor scans use `@views` + `zip` for allocation-free tails.
 
 	**Value**
-	Returns a `Dict{String, Any}` containing:
-	- `"infection_log"`: `Matrix{Float64}` with columns:
-	  - [1] time: simulation day
-	  - [2] n_infected: current infected count
-	  - [3] prop_ever_infected: cumulative infection proportion
-	  - [4] prop_currently_infected: current infection proportion
-	  - [5] n_recovered: total recovered count
-	  - [6] prop_recovered: proportion recovered among ever-infected
-	  - [7] n_immune: count with immunity (recovered in SIR, immune in SIRS)
-	- `"total_time"`: `Float64` computation time in seconds
-
-	**Examples**
-	```julia
-	# Load network with SAS preprocessing for comparison
-	network_data = sim_prep("network.graphml", sas_transformation=true)
-	
-	# Basic SIR model with social feedback
-	results = sirdif(network_data.alst, network_data.vlst, [1], 
-	                0.02, 14, 100, 0.75,
-	                -0.1, 1.0, -0.5, -3.5, -1.5, -0.1)
-	
-	# Extract epidemic curve
-	infection_log = results["infection_log"]
-	peak_prevalence = maximum(infection_log[:, 4])
-	final_size = infection_log[end, 3]
-	
-	# SIRS model with 30-day immunity period
-	results_sirs = sirdif(network_data.alst, network_data.vlst, [1, 5], 
-	                     0.02, 14, 300, 0.75,
-	                     -0.1, 1.0, -0.5, -3.5, -1.5, -0.1,
-	                     immunity_duration=30)
-	
-	# Parameter sweep for comparison with SAS
-	for b_peer in [0.0, -0.5, -1.0]
-	    results = sirdif(network_data.alst, network_data.vlst, [1], 
-	                    0.02, 14, 200, 0.75,
-	                    -0.1, 1.0, b_peer, -3.5, -1.5, -0.1)
-	    println("Peer effect $b_peer: Final size $(results["infection_log"][end, 3])")
-	end
-	```
+	A `Dict{String,Any}` with:
+	- `"infection_log"::Matrix{Float64}`: rows per time step, columns:  
+	`[1] time, [2] n_infected, [3] prop_ever_infected, [4] prop_currently_infected, [5] n_recovered, [6] prop_recovered, [7] n_immune`
+	- `"total_time"::Float64`: runtime in seconds.
+	- `"final_state"::Matrix{Int}`: state matrix at termination.
 
 	**See Also**
-	`transmission_prob`, `sim_prep`, `replicate_sas_simulation`, `sas_simulation_comparer`
-
-	**References**
-	Based on behavioral epidemic models incorporating social feedback mechanisms.
-	Processing order and logic validated against SAS PROC IML implementations for 
-	direct comparability in epidemiological research.
+	`transmission_prob`, `matrix_to_vector_adjacency`
 	""" sirdif
+		
+
+
+
 
 #   Exporting Objects
     export arithmetic_mode,

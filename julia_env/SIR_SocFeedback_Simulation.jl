@@ -1016,7 +1016,12 @@ using diffustion_sim
 			}
 
 			# 	Color palette for Symptomatic lines
-			pal <- grDevices::rainbow(length(self_levels))
+			pal_base <- c("#66CCEE", "#228833", "#CCBB44", "#EE6677", "#AA3377", "#4477AA", "#BBBBBB")
+			if (length(self_levels) <= length(pal_base)) {
+			pal <- pal_base[seq_along(self_levels)]
+			} else {
+			pal <- grDevices::colorRampPalette(pal_base)(length(self_levels))
+			}
 
 			# 	Panels
 				for (gi in seq_along(glob_levels)) {
@@ -1471,6 +1476,7 @@ using diffustion_sim
 #   Comparisative Tests: Replication Analysis
 
 #   Load network from GraphML file
+#	network_data = sim_prep("/workspace/data/sim_test_data/WeakCore1_3.2_2.graphml", sas_transformation=false)
 	network_data = sim_prep("/workspace/data/sim_test_data/WeakCore1_3.2_2.graphml", sas_transformation=true)
 	alst = network_data.alst
 	vlst = network_data.vlst
@@ -1497,4 +1503,157 @@ using diffustion_sim
 
 #	Looking at Maximum Difference
 	maximum(comp_table.propeverinf_delta)
+
+########################
+#   DIAGNOSTIC TESTS   #
+########################
+
+#	Build 5-Node Line Network
+	function build_line5()
+		"""
+		Args:
+			None
+		Returns:
+			Tuple{Matrix{Int}, Matrix{Float64}}: (alst, vlst)
+		Notes:
+			Matrix format with id in col 1; neighbor ids in cols 2..4 (0 = none).
+			Weights set to 1.0 for each existing edge; zeros elsewhere.
+		"""
+		#	Allocate adjacency with id column
+			alst = zeros(Int, 5, 4)
+			alst[:, 1] = 1:5
+
+		#	Wire neighbors (1–2–3–4–5)
+			alst[1, 2:4] = [2, 0, 0]
+			alst[2, 2:4] = [1, 3, 0]
+			alst[3, 2:4] = [2, 4, 0]
+			alst[4, 2:4] = [3, 5, 0]
+			alst[5, 2:4] = [4, 0, 0]
+
+		#	Weights: 1.0 where an edge exists (neighbor cols only)
+			vlst = zeros(Float64, size(alst))
+			vlst[:, 2:4] .= Float64.(alst[:, 2:4] .> 0)
+
+		#	Return
+			return alst, vlst
+	end
+
+#	Build 5-Node Star Network (center=1)
+	function build_star5()
+		"""
+		Args:
+			None
+		Returns:
+			Tuple{Matrix{Int}, Matrix{Float64}}: (alst, vlst)
+		Notes:
+			Undirected star encoded row-wise; center 1 connected to {2,3,4,5}.
+		"""
+		#	Allocate adjacency with id column
+			alst = zeros(Int, 5, 5)          # center has 4 alters
+			alst[:, 1] = 1:5
+
+		#	Wire neighbors
+			alst[1, 2:5] = [2, 3, 4, 5]      # vector, not tuple
+			alst[2, 2]   = 1
+			alst[3, 2]   = 1
+			alst[4, 2]   = 1
+			alst[5, 2]   = 1
+
+		#	Weights aligned to alst (1.0 on edges in neighbor cols)
+			vlst = zeros(Float64, size(alst))
+			vlst[:, 1] = Float64.(alst[:, 1])        # carry id in col 1 (for consistency)
+			vlst[:, 2:end] .= Float64.(alst[:, 2:end] .> 0)
+
+		#	Return
+			return alst, vlst
+	end
+
+#	Tier 0 — Test 1: All-On Per-Contact
+	function test_t0_all_on(; seed::Int=1234, maxtime::Int=10, rec_t::Int=14)
+		"""
+		Args:
+			seed::Int: RNG seed (for completeness)
+			maxtime::Int: simulation horizon (days)
+			rec_t::Int: days to recovery
+		Returns:
+			NamedTuple: (
+				line_log, star_log, line_out, star_out, params
+			)
+		Notes:
+			Forces activation ~ 1 via large intercept and sets per-contact transmission = 1
+			(`transmission_method = :simple`). Should yield near-deterministic spread governed
+			primarily by topology.
+		"""
+		#	Seed RNG
+			Random.seed!(seed)
+		#	Build networks
+			line_alst, line_vlst = build_line5()
+			star_alst, star_vlst = build_star5()
+		#	Params: activation on; transmission always succeeds
+			p_symp       = 0.0
+			b_int        = 20.0         # logistic(20) ≈ 1
+			b_close      = 0.0
+			b_cxn_peers  = 0.0
+			b_cxn_total  = 0.0
+			b_cxn_symp   = 0.0
+			b_cls_x_smp  = 0.0
+			inf_r        = 1.0
+			tx_method    = :simple
+		#	Run: line (seed at node 1)
+			line_out = sirdif(
+				line_alst, line_vlst,
+				[1], inf_r, rec_t, maxtime,
+				p_symp, b_int, b_close, b_cxn_peers, b_cxn_total, b_cxn_symp, b_cls_x_smp;
+				transmission_method = tx_method,
+				immunity_duration   = nothing
+			)
+			line_log = line_out["infection_log"]
+		#	Run: star (seed at node 1, the center)
+			star_out = sirdif(
+				star_alst, star_vlst,
+				[1], inf_r, rec_t, maxtime,
+				p_symp, b_int, b_close, b_cxn_peers, b_cxn_total, b_cxn_symp, b_cls_x_smp;
+				transmission_method = tx_method,
+				immunity_duration   = nothing
+			)
+			star_log = star_out["infection_log"]
+		#	Light invariants
+			@assert size(line_log, 2) == 7 "line_log must have 7 columns"
+			@assert size(star_log, 2) == 7 "star_log must have 7 columns"
+			@assert line_log[1, 1] == 0.0 "first row is time 0 for line"
+			@assert star_log[1, 1] == 0.0 "first row is time 0 for star"
+		#	Return artifacts and params
+			return (
+				line_log = line_log,
+				star_log = star_log,
+				line_out = line_out,
+				star_out = star_out,
+				params = (
+					p_symp      = p_symp,
+					b_int       = b_int,
+					b_close     = b_close,
+					b_cxn_peers = b_cxn_peers,
+					b_cxn_total = b_cxn_total,
+					b_cxn_symp  = b_cxn_symp,
+					b_cls_x_smp = b_cls_x_smp,
+					inf_r       = inf_r,
+					tx_method   = tx_method,
+					rec_t       = rec_t,
+					maxtime     = maxtime,
+					seed        = seed
+				)
+			)
+	end
+
+#	Test 1
+	res = test_t0_all_on(seed=1234, maxtime=10, rec_t=14)
+
+#	Quick peek
+	first(res.line_log, 6), first(res.star_log, 6)
+
+#	Access pieces
+	line_log = res.line_log
+	star_log = res.star_log
+	params   = res.params
+
 
