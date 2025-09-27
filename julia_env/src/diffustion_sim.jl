@@ -1081,68 +1081,118 @@ module diffustion_sim
 			elwgt = network_data.weights
 			n = length(nl)
 		
-		#	Create binary adjacency matrix for structure
-			adj_mat_binary, nodeset = el2adjval(nl, el1, el2, ones(Float64, length(elwgt)))
-			
-		#	Create weighted adjacency matrix
-			adj_mat_weighted, _ = el2adjval(nl, el1, el2, elwgt)
-			
 		#	Apply SAS transformation if requested
 			if sas_transformation
-				#	Symmetrize: symmat = (amat + transpose(amat))
-					symmat = adj_mat_weighted + transpose(adj_mat_weighted)
+				#	CRITICAL: load_graphml already doubles edges for undirected graphs
+				#	We need to deduplicate to match what SAS pajread produces
+				#	Keep only unique undirected edges
+					edge_set = Set{Tuple{Int,Int}}()
+					el1_dedup = Int[]
+					el2_dedup = Int[]
 					
-				#	Calculate common thirds
-					binary_mat = Float64.(symmat .> 0)
-					com3rds = (binary_mat * binary_mat) .* binary_mat
+					for (src, tgt) in zip(el1, el2)
+						edge_key = src <= tgt ? (src, tgt) : (tgt, src)
+						if !(edge_key in edge_set)
+							push!(edge_set, edge_key)
+							push!(el1_dedup, src)
+							push!(el2_dedup, tgt)
+						end
+					end
+				
+				#	Build adjacency matrix exactly as SAS adj() does
+					unique_nodes = sort(unique(vcat(el1_dedup, el2_dedup)))
+					n = length(unique_nodes)
+					node_to_idx = Dict(node => idx for (idx, node) in enumerate(unique_nodes))
 					
-				#	Take square root of common thirds
+				#	Create adjacency matrix (counting edges)
+					amat = zeros(Float64, n, n)
+					for (sender, receiver) in zip(el1_dedup, el2_dedup)
+						i = node_to_idx[sender]
+						j = node_to_idx[receiver]
+						amat[i, j] += 1.0  # SAS adj() increments for each edge
+					end
+				
+				#	Step 2a: Symmetrize (amat + amat')
+					symmat = amat + transpose(amat)
+					
+				#	Step 2b: Calculate common thirds
+				#	com3rds = ((symmat>0)*(symmat>0))#(symmat>0)
+					binary = Float64.(symmat .> 0)
+					com3rds = (binary * binary) .* binary
+					
+				#	Step 2c: Square root of common thirds
+				#	com3rds = com3rds##0.5
 					com3rds = sqrt.(com3rds)
 					
-				#	Add common thirds to symmetrized matrix
-					adj_mat_weighted = symmat + com3rds
+				#	Step 2d: Add to symmetrized matrix
+				#	symmat = symmat + com3rds
+					symmat = symmat + com3rds
 					
-				#	Update binary matrix for structure
-					adj_mat_binary = Float64.(adj_mat_weighted .> 0)
+				#	Convert to adjacency list format
+					max_degree = Int(maximum(sum(symmat .> 0, dims=2)))
+					alst = zeros(Int, n, max_degree + 1)
+					vlst = zeros(Float64, n, max_degree + 1)
 					
-				println("Applied SAS transformation: symmetrization + common thirds")
-			end
-			
-		#	Calculate maximum degree
-			max_degree = maximum(sum(adj_mat_binary .> 0, dims=2))
-			
-		#	Initialize adjacency list and value list
-			alst = zeros(Int, n, Int(max_degree) + 1)  # +1 for node ID column
-			vlst = zeros(Float64, n, Int(max_degree) + 1)
-			
-		#	Populate node IDs in first column
-			for i in 1:n
-				alst[i, 1] = nodeset[i]
-				vlst[i, 1] = Float64(nodeset[i])
-			end
-		
-		#	Fill adjacency and value lists
-			for i in 1:n
-				#	Find neighbors
-					neighbors = findall(x -> x > 0, adj_mat_binary[i, :])
+				#	Fill ID columns (using the sorted unique nodes)
+					alst[:, 1] = unique_nodes
+					vlst[:, 1] = Float64.(unique_nodes)
 					
-					if !isempty(neighbors)
-						#	Map indices to node IDs and extract weights
-							neighbor_ids = [nodeset[j] for j in neighbors]
-							weights = [adj_mat_weighted[i, j] for j in neighbors]
-							
-						#	Fill adjacency list
-							for (col, nid) in enumerate(neighbor_ids)
-								if col + 1 <= size(alst, 2)
-									alst[i, col + 1] = nid
-								end
+				#	Fill neighbor lists
+					for i in 1:n
+						neighbors = findall(x -> x > 0, symmat[i, :])
+						for (col_idx, j) in enumerate(neighbors)
+							if col_idx + 1 <= size(alst, 2)
+								alst[i, col_idx + 1] = unique_nodes[j]
+								vlst[i, col_idx + 1] = symmat[i, j]
 							end
+						end
+					end
+					
+					println("Applied SAS transformation: symmetrization + common thirds")
+			else
+				#	No SAS transformation - use raw network
+				#	Create binary adjacency matrix for structure
+					adj_mat_binary, nodeset = el2adjval(nl, el1, el2, ones(Float64, length(elwgt)))
+					
+				#	Create weighted adjacency matrix
+					adj_mat_weighted, _ = el2adjval(nl, el1, el2, elwgt)
+					
+				#	Calculate maximum degree
+					max_degree = Int(maximum(sum(adj_mat_binary .> 0, dims=2)))
+					
+				#	Initialize adjacency list and value list
+					alst = zeros(Int, n, max_degree + 1)  # +1 for node ID column
+					vlst = zeros(Float64, n, max_degree + 1)
+					
+				#	Populate node IDs in first column
+					for i in 1:n
+						alst[i, 1] = nodeset[i]
+						vlst[i, 1] = Float64(nodeset[i])
+					end
+				
+				#	Fill adjacency and value lists
+					for i in 1:n
+						#	Find neighbors
+							neighbors = findall(x -> x > 0, adj_mat_binary[i, :])
 							
-						#	Fill value list
-							for (col, wgt) in enumerate(weights)
-								if col + 1 <= size(vlst, 2)
-									vlst[i, col + 1] = wgt
-								end
+							if !isempty(neighbors)
+								#	Map indices to node IDs and extract weights
+									neighbor_ids = [nodeset[j] for j in neighbors]
+									weights = [adj_mat_weighted[i, j] for j in neighbors]
+									
+								#	Fill adjacency list
+									for (col, nid) in enumerate(neighbor_ids)
+										if col + 1 <= size(alst, 2)
+											alst[i, col + 1] = nid
+										end
+									end
+									
+								#	Fill value list
+									for (col, wgt) in enumerate(weights)
+										if col + 1 <= size(vlst, 2)
+											vlst[i, col + 1] = wgt
+										end
+									end
 							end
 					end
 			end
@@ -1168,20 +1218,20 @@ module diffustion_sim
 	1. Parses GraphML file using EzXML to extract nodes, edges, and weights
 	2. Handles both directed and undirected graphs automatically
 	3. If `sas_transformation=true`, applies these transformations:
-	   - **Symmetrization**: Creates undirected network via `A + A'`
-	   - **Common thirds**: Adds edges between nodes sharing neighbors via `(A*A) ⊙ A`
-	   - **Square root weighting**: Applies `sqrt()` to common third connections
-	   - **Combination**: Final network = symmetrized + sqrt(common thirds)
+	- **Symmetrization**: Creates undirected network via `A + A'`
+	- **Common thirds**: Adds edges between nodes sharing neighbors via `(A*A) ⊙ A`
+	- **Square root weighting**: Applies `sqrt()` to common third connections
+	- **Combination**: Final network = symmetrized + sqrt(common thirds)
 	4. Converts to adjacency list format where:
-	   - Each row represents a node
-	   - First column contains the node ID
-	   - Subsequent columns contain neighbor IDs (0 for empty slots)
+	- Each row represents a node
+	- First column contains the node ID
+	- Subsequent columns contain neighbor IDs (0 for empty slots)
 	5. Creates parallel value list containing edge weights
-	
+
 	The SAS transformation significantly changes network topology by adding edges
 	between nodes that share common neighbors, which can increase epidemic spread
 	by creating additional transmission pathways.
-	
+
 	GraphML weight attributes are detected automatically. The function looks for
 	edge attributes named "weight", "value", "e_weight", or "d1". If no weights 
 	are found, all edges are assigned weight 1.0.
@@ -1195,23 +1245,23 @@ module diffustion_sim
 	```julia
 	# Load network without SAS preprocessing (raw network)
 	network_data = sim_prep("network.graphml")
-	
+
 	# Load network with SAS preprocessing (for comparison with SAS)
 	network_sas = sim_prep("network.graphml", sas_transformation=true)
-	
+
 	# Compare network properties
 	raw_edges = sum(network_data.vlst .> 0)
 	sas_edges = sum(network_sas.vlst .> 0)
 	println("Raw edges: $raw_edges, SAS-processed edges: $sas_edges")
-	
+
 	# Use in simulations
 	# For Julia-only studies:
 	results_julia = sirdif(network_data.alst, network_data.vlst, [1], 
-	                      0.02, 14, 200, 0.75, -0.1, 1.0, -0.5, -3.5, -1.5, -0.1)
-	
+						0.02, 14, 200, 0.75, -0.1, 1.0, -0.5, -3.5, -1.5, -0.1)
+
 	# For SAS comparison studies:
 	results_sas_style = sirdif(network_sas.alst, network_sas.vlst, [1], 
-	                          0.02, 14, 200, 0.75, -0.1, 1.0, -0.5, -3.5, -1.5, -0.1)
+							0.02, 14, 200, 0.75, -0.1, 1.0, -0.5, -3.5, -1.5, -0.1)
 	```
 
 	**See Also**

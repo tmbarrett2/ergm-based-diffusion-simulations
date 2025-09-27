@@ -23,6 +23,7 @@
 ################
 using CSV
 using DataFrames
+using EzXML
 using ProgressMeter
 using Random
 using RCall
@@ -2164,9 +2165,3 @@ using diffustion_sim
 	mx = test_symptomatic_mixed_star_sweep(nseeds=200)
 	mx.summary
 	first(mx.results, 9)
-
-
-
-
-
-
