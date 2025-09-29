@@ -1316,7 +1316,7 @@ module diffustion_sim
 			return (alst_vec, vlst_vec)
 	end
 
-#	SIR Diffusion Simulation with Social Feedback
+#	SIR Diffusion Simulation with Social Feedbacks
 	function sirdif(
 		alst::Union{Matrix{Int}, Vector{Vector{Int}}},
 		vlst::Union{Matrix{Float64}, Vector{Vector{Float64}}},
@@ -1327,6 +1327,32 @@ module diffustion_sim
 		transmission_method::Symbol = :weighted,
 		immunity_duration::Union{Int,Nothing} = nothing
 	)
+		"""
+		Args:
+			alst: Adjacency list (Matrix or Vector{Vector})
+			vlst: Edge weights aligned to alst
+			infectedp: Initial infected node IDs
+			inf_r: Base transmission probability
+			rec_t: Recovery time in days
+			maxtime: Maximum simulation days
+			p_symp: Probability infected is symptomatic
+			b_int: Baseline interaction coefficient
+			b_close: Edge weight coefficient
+			b_cxn_peers: Peer infection coefficient
+			b_cxn_total: Global infection coefficient
+			b_cxn_symp: Symptomatic coefficient
+			b_cls_x_smp: Peers × symptomatic interaction
+			transmission_method: :weighted or :simple (default :weighted)
+			immunity_duration: Days of immunity after recovery (default nothing)
+		Returns:
+			Dict with infection_log, total_time, final_state
+		Notes:
+			Preserves infection order across timesteps for path-dependency.
+			Globally removes infected nodes from susceptible lists matching SAS.
+			Peer and global terms in the activation logit use a start-of-day (t₀) snapshot.
+			`NBRSINF_COL` is overwritten each day with the t₀ snapshot for auditing.
+		"""
+
 		#	Cache n from the input (SAS-aligned)
 			if alst isa Matrix{Int}
 				n_nodes = size(alst, 1)
@@ -1340,26 +1366,29 @@ module diffustion_sim
 				vlst_vec   = Vector{Vector{Float64}}(undef, n_nodes)
 				unique_ids = Vector{Int}(undef, n_nodes)
 				@inbounds for i in 1:n_nodes
-					ego_id        = alst[i, 1]
-					unique_ids[i] = ego_id
-					row_ids       = alst[i, 2:end]
-					row_wgts      = vlst[i, 2:end]
-					nz_mask       = row_ids .> 0
-					neighbors     = row_ids[nz_mask]
-					weights       = row_wgts[nz_mask]
-					alst_vec[i]   = [ego_id; neighbors]
-					vlst_vec[i]   = [Float64(ego_id); weights]
+					#	Extract ego and neighbors
+						ego_id        = alst[i, 1]
+						unique_ids[i] = ego_id
+						row_ids       = alst[i, 2:end]
+						row_wgts      = vlst[i, 2:end]
+						nz_mask       = row_ids .> 0
+						neighbors     = row_ids[nz_mask]
+						weights       = row_wgts[nz_mask]
+						alst_vec[i]   = [ego_id; neighbors]
+						vlst_vec[i]   = [Float64(ego_id); weights]
 				end
 			else
 				alst_vec   = Vector{Vector{Int}}(undef, n_nodes)
 				vlst_vec   = Vector{Vector{Float64}}(undef, n_nodes)
 				@inbounds for i in 1:n_nodes
-					alst_vec[i] = alst[i]
-					vlst_vec[i] = vlst[i]
+					#	Copy existing vectors
+						alst_vec[i] = alst[i]
+						vlst_vec[i] = vlst[i]
 				end
 				unique_ids = Vector{Int}(undef, n_nodes)
 				@inbounds for i in 1:n_nodes
-					unique_ids[i] = alst_vec[i][1]
+					#	Extract node IDs
+						unique_ids[i] = alst_vec[i][1]
 				end
 			end
 
@@ -1369,8 +1398,8 @@ module diffustion_sim
 		#	Start timing
 			start_time = time()
 
-		#	State matrix: [id, I, S, R, t_rec, nbrsinf]
-			state = zeros(Int, n_nodes, 6)
+		#	State matrix: [id, I, S, R, t_rec, nbrsinf, infection_order]
+			state = zeros(Int, n_nodes, 7)
 			@inbounds begin
 				state[:, 1] .= unique_ids
 				state[:, 3] .= 1
@@ -1383,25 +1412,51 @@ module diffustion_sim
 			RECOVERED_COL        = 4
 			TIME_TO_RECOVERY_COL = 5
 			NBRSINF_COL          = 6
+			INFECTION_ORDER_COL  = 7
+
+		#	Initialize infection counter
+			infection_counter = 0
 
 		#	Seed infections
 			@inbounds for inf_id in infectedp
-				idx = id_to_idx[inf_id]
-				state[idx, INFECTED_COL]         = 1
-				state[idx, SUSCEPTIBLE_COL]      = 0
-				state[idx, TIME_TO_RECOVERY_COL] = rec_t
+				#	Mark as infected
+					idx = id_to_idx[inf_id]
+					state[idx, INFECTED_COL]         = 1
+					state[idx, SUSCEPTIBLE_COL]      = 0
+					state[idx, TIME_TO_RECOVERY_COL] = rec_t
+					infection_counter += 1
+					state[idx, INFECTION_ORDER_COL]  = infection_counter
 			end
 
-		#	Initial neighbor exposure (before S-list pruning)
+		#	Create s_alst (susceptible adjacency) matching SAS - store as neighbor sets
+			s_alst_vec = Vector{Set{Int}}(undef, n_nodes)
+			s_vlst_map = Vector{Dict{Int,Float64}}(undef, n_nodes)
 			@inbounds for i in 1:n_nodes
-				ego_id  = alst_vec[i][1]
-				ego_row = id_to_idx[ego_id]
-				if state[ego_row, INFECTED_COL] == 1
-					for alter_id in @view alst_vec[i][2:end]
-						alter_idx = id_to_idx[alter_id]
-						state[alter_idx, NBRSINF_COL] += 1
+				#	Initialize with all neighbors
+					neighbors = alst_vec[i][2:end]
+					weights   = vlst_vec[i][2:end]
+					s_alst_vec[i] = Set(neighbors)
+					s_vlst_map[i] = Dict(zip(neighbors, weights))
+			end
+
+		#	Global removal of initially infected from s_alst (matching SAS)
+			@inbounds for inf_id in infectedp
+				#	Remove this infected node from ALL neighbor sets
+					for i in 1:n_nodes
+						delete!(s_alst_vec[i], inf_id)
 					end
-				end
+			end
+
+		#	Initial neighbor exposure (after S-list pruning) — will be overwritten by t₀ snapshot each day
+			@inbounds for i in 1:n_nodes
+				#	Check if infected and update neighbors
+					if state[i, INFECTED_COL] == 1
+						for alter_id in s_alst_vec[i]
+							#	Increment neighbor's exposure count
+								alter_idx = id_to_idx[alter_id]
+								state[alter_idx, NBRSINF_COL] += 1
+						end
+					end
 			end
 
 		#	Time series (t=0)
@@ -1410,131 +1465,180 @@ module diffustion_sim
 			pinf      = n_initial / n_nodes
 			timesum   = vcat(timesum, [0.0 n_initial pinf 0.0 0.0 0.0 0.0])
 
-		#	Scratch
-			new_infections_cnt = 0
-
 		#	Main loop
 			@inbounds for t in 1:maxtime
-				new_infections_cnt = 0
+				#	t₀ snapshot of infection for day t
+					infected_t0_mask = (state[:, INFECTED_COL] .== 1)
+					ninf_t0 = count(infected_t0_mask)
 
-			#	Current infected (for global term)
-				ninf = 0
-				for i in 1:n_nodes
-					ninf += state[i, INFECTED_COL]
-				end
-
-			#	Padding if epidemic ended
-				if ninf == 0
-					NR_now = 0
+				#	Compute peers-infected snapshot at t₀ using ORIGINAL adjacency
+					peersinf_t0 = zeros(Int, n_nodes)
 					for i in 1:n_nodes
-						NR_now += state[i, RECOVERED_COL]
-					end
-					ever_now      = NR_now
-					prop_ever_now = ever_now == 0 ? 0.0 : ever_now / n_nodes
-					prop_rec_now  = ever_now == 0 ? 0.0 : 1.0
-					for tt in t:maxtime
-						timesum = vcat(timesum, [Float64(tt) 0.0 prop_ever_now 0.0 NR_now prop_rec_now NR_now])
-					end
-					break
-				end
-
-			#	Per-ego infection attempts
-				for ego_idx in 1:n_nodes
-					if state[ego_idx, INFECTED_COL] != 1
-						continue
-					end
-
-					neighbors = alst_vec[ego_idx]
-					weights   = vlst_vec[ego_idx]
-					issympt   = rand() < p_symp ? 1 : 0
-
-				#	Scan susceptible alters (skip ego at position 1)
-					for (alter_id, edgwgt) in zip(@view(neighbors[2:end]), @view(weights[2:end]))
-						alter_idx = id_to_idx[alter_id]
-						if state[alter_idx, SUSCEPTIBLE_COL] != 1
-							continue
-						end
-
-						peersinf = state[alter_idx, NBRSINF_COL]
-
-					#	SAS-aligned activation
-						lwact    = b_int +
-						           (issympt * b_cxn_symp) +
-						           (b_close * edgwgt) +
-						           (b_cxn_peers * peersinf) +
-						           (b_cxn_total * (ninf / (n_nodes / 3))) +
-						           (b_cls_x_smp * peersinf * issympt)
-						prob_act = exp(lwact) / (1 + exp(lwact))
-
-						if rand() < prob_act
-						#	SAS transmission probability
-							tranprob = transmission_method === :weighted ?
-							           (1 - (1 - inf_r)^edgwgt) : inf_r
-							if rand() < tranprob
-								state[alter_idx, INFECTED_COL]         = 1
-								state[alter_idx, SUSCEPTIBLE_COL]      = 0
-								state[alter_idx, TIME_TO_RECOVERY_COL] = rec_t
-								new_infections_cnt += 1
-
-							#	Update nbrsinf for ego’s neighbors
-								for nbr_id in @view neighbors[2:end]
-									nbr_idx = id_to_idx[nbr_id]
-									state[nbr_idx, NBRSINF_COL] += 1
-								end
+						if infected_t0_mask[i]
+							for nbr_id in @view(alst_vec[i][2:end])
+								nbr_idx = id_to_idx[nbr_id]
+								peersinf_t0[nbr_idx] += 1
 							end
 						end
 					end
 
-				#	Recovery countdown
-					state[ego_idx, TIME_TO_RECOVERY_COL] -= 1
-				end
+				#	Overwrite NBRSINF_COL for auditing/consistency
+					state[:, NBRSINF_COL] .= peersinf_t0
 
-			#	Move to recovered
-				for i in 1:n_nodes
-					if state[i, TIME_TO_RECOVERY_COL] == 0 && state[i, INFECTED_COL] == 1
-						state[i, INFECTED_COL]         = 0
-						state[i, RECOVERED_COL]        = 1
-						state[i, TIME_TO_RECOVERY_COL] = 0
-						if immunity_duration !== nothing
-							state[i, TIME_TO_RECOVERY_COL] = -immunity_duration
-						end
-					end
-				end
-
-			#	SIRS waning immunity
-				if immunity_duration !== nothing
-				#	Tick immunity timers (negative → 0)
+				#	Collect infected indices sorted by infection order (FIFO)
+					infected_data = Tuple{Int, Int}[]
+					ninf = 0
 					for i in 1:n_nodes
-						if state[i, TIME_TO_RECOVERY_COL] < 0 && state[i, RECOVERED_COL] == 1
-							state[i, TIME_TO_RECOVERY_COL] += 1
-						end
+						#	Count and collect infected with their infection order
+							if state[i, INFECTED_COL] == 1
+								push!(infected_data, (i, state[i, INFECTION_ORDER_COL]))
+								ninf += 1
+							end
 					end
-				#	When timer hits 0 while recovered → back to susceptible
+
+				#	Sort by infection order to ensure FIFO processing
+					sort!(infected_data, by = x -> x[2])
+					infected_indices = [x[1] for x in infected_data]
+
+				#	Padding if epidemic ended
+					if ninf == 0
+						NR_now = 0
+						for i in 1:n_nodes
+							#	Count recovered for final stats
+								NR_now += state[i, RECOVERED_COL]
+						end
+						ever_now      = NR_now
+						prop_ever_now = ever_now == 0 ? 0.0 : ever_now / n_nodes
+						prop_rec_now  = ever_now == 0 ? 0.0 : 1.0
+						for tt in t:maxtime
+							#	Pad remaining timesteps
+								timesum = vcat(timesum, [Float64(tt) 0.0 prop_ever_now 0.0 NR_now prop_rec_now NR_now])
+						end
+						break
+					end
+
+				#	Process infected nodes in infection order (preserves path dependency)
+					for ego_idx in infected_indices
+						#	Get ego's susceptible neighbors from s_alst (already filtered)
+							ego_id = unique_ids[ego_idx]
+							susceptible_neighbor_ids = collect(s_alst_vec[ego_idx])
+
+						#	Sort to ensure consistent order (matching column order)
+							sort!(susceptible_neighbor_ids)
+
+						#	Determine symptomatic status (per ego per day)
+							issympt = rand() < p_symp ? 1 : 0
+
+						#	Scan susceptible neighbors in consistent order using t₀ snapshots
+							for alter_id in susceptible_neighbor_ids
+								#	Get alter index and edge weight
+									alter_idx = id_to_idx[alter_id]
+									edgwgt = s_vlst_map[ego_idx][alter_id]
+
+								#	Double-check susceptibility (should be redundant but safe)
+									if state[alter_idx, SUSCEPTIBLE_COL] != 1
+										continue
+									end
+
+								#	Use peersinf_t0 and ninf_t0 (frozen at start of day)
+									peersinf = peersinf_t0[alter_idx]
+
+								#	Activation logit (t₀-driven)
+									lwact = b_int +
+											(issympt * b_cxn_symp) +
+											(b_close * edgwgt) +
+											(b_cxn_peers * peersinf) +
+											(b_cxn_total * (ninf_t0 / (n_nodes / 3))) +
+											(b_cls_x_smp * peersinf * issympt)
+									prob_act = exp(lwact) / (1 + exp(lwact))
+
+								#	Activation and transmission
+									if rand() < prob_act
+										#	SAS transmission probability
+											transprob = transmission_method === :weighted ?
+												(1 - (1 - inf_r)^edgwgt) : inf_r
+											if rand() < transprob
+												#	Update state
+													state[alter_idx, INFECTED_COL]         = 1
+													state[alter_idx, SUSCEPTIBLE_COL]      = 0
+													state[alter_idx, TIME_TO_RECOVERY_COL] = rec_t
+													infection_counter += 1
+													state[alter_idx, INFECTION_ORDER_COL]  = infection_counter
+
+												#	Global removal from s_alst (matching SAS)
+													for k in 1:n_nodes
+														delete!(s_alst_vec[k], alter_id)
+													end
+												#	No within-day peersinf bumps; next day's snapshot will include this.
+											end
+									end
+							end
+
+						#	Recovery countdown
+							state[ego_idx, TIME_TO_RECOVERY_COL] -= 1
+					end
+
+				#	Move to recovered
 					for i in 1:n_nodes
-						if state[i, TIME_TO_RECOVERY_COL] == 0 && state[i, RECOVERED_COL] == 1
-							state[i, RECOVERED_COL]   = 0
-							state[i, SUSCEPTIBLE_COL] = 1
-						end
+						#	Check for recovery
+							if state[i, TIME_TO_RECOVERY_COL] == 0 && state[i, INFECTED_COL] == 1
+								state[i, INFECTED_COL]         = 0
+								state[i, RECOVERED_COL]        = 1
+								state[i, TIME_TO_RECOVERY_COL] = 0
+								state[i, INFECTION_ORDER_COL]  = 0	# Clear infection order
+								if immunity_duration !== nothing
+									state[i, TIME_TO_RECOVERY_COL] = -immunity_duration
+								end
+							end
 					end
-				end
 
-			#	State consistency
-				for i in 1:n_nodes
-					sum_row = state[i, INFECTED_COL] + state[i, SUSCEPTIBLE_COL] + state[i, RECOVERED_COL]
-					@assert sum_row == 1 "Invalid state for node $(state[i, ID_COL]): I=$(state[i,2]) S=$(state[i,3]) R=$(state[i,4])"
-				end
+				#	SIRS waning immunity
+					if immunity_duration !== nothing
+						#	Tick immunity timers (negative → 0)
+							for i in 1:n_nodes
+								#	Increment timer toward zero
+									if state[i, TIME_TO_RECOVERY_COL] < 0 && state[i, RECOVERED_COL] == 1
+										state[i, TIME_TO_RECOVERY_COL] += 1
+									end
+							end
+						#	When timer hits 0 while recovered → back to susceptible
+							for i in 1:n_nodes
+								#	Check for immunity expiration
+									if state[i, TIME_TO_RECOVERY_COL] == 0 && state[i, RECOVERED_COL] == 1
+										state[i, RECOVERED_COL]   = 0
+										state[i, SUSCEPTIBLE_COL] = 1
+										#	Add back to s_alst for all neighbors
+											for j in 1:n_nodes
+												if i != j
+													neighbors = alst_vec[j]
+													if unique_ids[i] in neighbors[2:end]
+														push!(s_alst_vec[j], unique_ids[i])
+													end
+												end
+											end
+									end
+							end
+					end
 
-			#	Metrics and record
-				NI = 0; NR = 0
-				for i in 1:n_nodes
-					NI += state[i, INFECTED_COL]
-					NR += state[i, RECOVERED_COL]
-				end
-				prop_ever = (NI + NR) / n_nodes
-				prop_cur  = NI / n_nodes
-				prop_rec  = (NI + NR) > 0 ? NR / (NI + NR) : 0.0
+				#	State consistency check
+					for i in 1:n_nodes
+						#	Verify exactly one state
+							sum_row = state[i, INFECTED_COL] + state[i, SUSCEPTIBLE_COL] + state[i, RECOVERED_COL]
+							@assert sum_row == 1 "Invalid state for node $(state[i, ID_COL]): I=$(state[i,2]) S=$(state[i,3]) R=$(state[i,4])"
+					end
 
-				timesum = vcat(timesum, [Float64(t) NI prop_ever prop_cur NR prop_rec NR])
+				#	Metrics and record
+					NI = 0; NR = 0
+					for i in 1:n_nodes
+						#	Count infected and recovered
+							NI += state[i, INFECTED_COL]
+							NR += state[i, RECOVERED_COL]
+					end
+					prop_ever = (NI + NR) / n_nodes
+					prop_cur  = NI / n_nodes
+					prop_rec  = (NI + NR) > 0 ? NR / (NI + NR) : 0.0
+
+					timesum = vcat(timesum, [Float64(t) NI prop_ever prop_cur NR prop_rec NR])
 			end
 
 		#	Elapsed time
@@ -1549,14 +1653,14 @@ module diffustion_sim
 	end
 	@doc raw"""
 	**Description**  
-	Simulates SIR/SIRS diffusion with *state-matrix* bookkeeping and SAS-aligned social feedback:
-	activation depends on symptoms, tie weight, infected peers, and a global prevalence term.
+	Simulates SIR/SIRS diffusion with exact SAS-matching behavior including global removal
+	of infected nodes from susceptible adjacency lists and path-dependent processing order.
 
 	**Usage**  
 	`sirdif(alst, vlst, infectedp, inf_r, rec_t, maxtime, p_symp, b_int, b_close, b_cxn_peers, b_cxn_total, b_cxn_symp, b_cls_x_smp; transmission_method=:weighted, immunity_duration=nothing)`
 
 	**Arguments**
-	- `alst::Union{Matrix{Int}, Vector{Vector{Int}}}`: Adjacency. If matrix, col 1 is id; remaining columns are neighbor ids (0 for none).  
+	- `alst::Union{Matrix{Int}, Vector{Vector{Int}}}`: Adjacency list. If matrix, col 1 is id; remaining columns are neighbor ids (0 for none).  
 	- `vlst::Union{Matrix{Float64}, Vector{Vector{Float64}}}`: Edge weights aligned to `alst`.  
 	- `infectedp::Vector{Int}`: Seed node ids.  
 	- `inf_r::Float64`: Base transmission probability per active contact.  
@@ -1568,25 +1672,25 @@ module diffustion_sim
 	- `immunity_duration::Union{Int,Nothing}`: If set, recovered nodes are immune for that many days (SIRS).
 
 	**Details**
-	- State matrix columns: `[id, infected, susceptible, recovered, time_to_recovery, nbrsinf]`.  
-	- Global term scales as `b_cxn_total * (ninf / (n/3))`, where `n` is the network size derived from `alst`.  
-	- New infections are applied immediately; they **do not** act as infectors until the next time step.  
-	- Matrix inputs are converted to vector form with the ego id in position 1; neighbor scans use `@views` + `zip` for allocation-free tails.
+	- State matrix columns: `[id, infected, susceptible, recovered, time_to_recovery, nbrsinf, infection_order]`.  
+	- Global term scales as `b_cxn_total * (ninf / (n/3))`, where `n` is network size from `alst`.  
+	- **Critical behaviors matching SAS**:
+	- Preserves exact infection order (FIFO) across all timesteps
+	- Globally removes infected nodes from ALL susceptible adjacency lists
+	- **Uses start-of-day (t₀) snapshots** for peer (`peersinf`) and global (`ninf`) inputs to the activation logit
+	- `NBRSINF_COL` is overwritten each day with the t₀ snapshot for auditing
+	- For SIRS: recovered nodes regain susceptibility after `immunity_duration` days
 
 	**Value**
 	A `Dict{String,Any}` with:
 	- `"infection_log"::Matrix{Float64}`: rows per time step, columns:  
-	`[1] time, [2] n_infected, [3] prop_ever_infected, [4] prop_currently_infected, [5] n_recovered, [6] prop_recovered, [7] n_immune`
+	`[1] time, [2] n_infected, [3] prop_ever_infected, [4] prop_currently_infected, [5] n_recovered, [6] prop_recovered, [7] n_recovered (dup)]`
 	- `"total_time"::Float64`: runtime in seconds.
 	- `"final_state"::Matrix{Int}`: state matrix at termination.
 
 	**See Also**
-	`transmission_prob`, `matrix_to_vector_adjacency`
+	`sim_prep`, `replicate_sas_simulation`
 	""" sirdif
-		
-
-
-
 
 #   Exporting Objects
     export arithmetic_mode,
