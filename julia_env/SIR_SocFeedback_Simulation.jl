@@ -3,7 +3,6 @@
 #27 August 2025
 
 #	To Do:
-#	Complete Simulation Test: Look at specific run to see why SAS is consistly scoring a higher infection rate.
 #	Move Small Speed Test Loop into a Wrapper that R interfaces with
 #	Conduct Julia/R Test of Wrapper
 #	Move Julia Package into an executable
@@ -531,45 +530,45 @@ using diffustion_sim
 				b_self  = b_self_v[i]
 
 				for it in 1:num_iter
-					# Random single seed (match SAS sampling of one node)
-					seednode = rand(1:n_nodes)
-					infectedp = [seednode]
+					# 	Random single seed (match SAS sampling of one node)
+						seednode = rand(1:n_nodes)
+						infectedp = [seednode]
 
-					# Run sirdif with this row's coefficients
-					result = sirdif(
-						alst, vlst, infectedp,
-						inf_r, rec_t, maxtime,
-						params[:p_symp],
-						params[:b_int], params[:b_close],
-						b_peers, b_glob, b_self, params[:b_cls_x_smp];
-						transmission_method = :weighted,
-						immunity_duration   = nothing
-					)
+					# 	Run sirdif with this row's coefficients
+						result = sirdif(
+							alst, vlst, infectedp,
+							inf_r, rec_t, maxtime,
+							params[:p_symp],
+							params[:b_int], params[:b_close],
+							b_peers, b_glob, b_self, params[:b_cls_x_smp];
+							transmission_method = :weighted,
+							immunity_duration   = nothing
+						)
 
-					# Copy trajectory rows
-					logmat = result["infection_log"]::Matrix{Float64}
-					T      = size(logmat, 1)
+					# 	Copy trajectory rows
+						logmat = result["infection_log"]::Matrix{Float64}
+						T      = size(logmat, 1)
 
-					@inbounds for k in 1:T
-						w += 1
-						coef_row_v[w]     = i
-						itter_v[w]        = it
-						seednode_v[w]     = seednode
+						@inbounds for k in 1:T
+							w += 1
+							coef_row_v[w]     = i
+							itter_v[w]        = it
+							seednode_v[w]     = seednode
 
-						b_cxn_peer_v[w]   = b_peers
-						b_cxn_global_v[w] = b_glob
-						b_self_v_out[w]   = b_self
-						b_int_v[w]        = params[:b_int]
-						b_close_v[w]      = params[:b_close]
-						b_cls_x_smp_v[w]  = params[:b_cls_x_smp]
-						p_symp_v[w]       = params[:p_symp]
-						beta_v[w]         = inf_r
+							b_cxn_peer_v[w]   = b_peers
+							b_cxn_global_v[w] = b_glob
+							b_self_v_out[w]   = b_self
+							b_int_v[w]        = params[:b_int]
+							b_close_v[w]      = params[:b_close]
+							b_cls_x_smp_v[w]  = params[:b_cls_x_smp]
+							p_symp_v[w]       = params[:p_symp]
+							beta_v[w]         = inf_r
 
-						time_v[w]         = logmat[k, 1]
-						propeverinf_v[w]  = logmat[k, 3]
-						propcurrinf_v[w]  = logmat[k, 4]
-						proprec_v[w]      = logmat[k, 6]
-					end
+							time_v[w]         = logmat[k, 1]
+							propeverinf_v[w]  = logmat[k, 3]
+							propcurrinf_v[w]  = logmat[k, 4]
+							proprec_v[w]      = logmat[k, 6]
+						end
 
 					ProgressMeter.next!(p)
 				end
@@ -978,13 +977,13 @@ using diffustion_sim
 		#	Plotting
 			R"""
 			# ---- Julia->R injected args as local vars ----
-			col_j <- $ycol_j
-			col_s <- $ycol_s
-			ylab  <- $y_label
-			ttl   <- $title_label
-			subt  <- $subtitle_label
-			param <- $param_text
-			spath <- $save_path
+			col_j <- ycol_j
+			col_s <- ycol_s
+			ylab  <- y_label
+			ttl   <- title_label
+			subt  <- subtitle_label
+			param <- param_text
+			spath <- save_path
 
 			# ---- Data prep ----
 			df <- comp_table
@@ -993,30 +992,28 @@ using diffustion_sim
 			df[["b_self"]]       <- as.numeric(df[["b_self"]])
 			df[["time"]]         <- as.numeric(df[["time"]])
 
-			# 	Facet levels
+			#  Facet levels
 			peer_levels <- sort(unique(df[["b_cxn_peer"]]))
 			glob_levels <- sort(unique(df[["b_cxn_global"]]))
 			self_levels <- sort(unique(df[["b_self"]]))
 
-			# 	Layout: rows = Global effect, cols = Peer effect
+			#  Layout: rows = Global effect, cols = Peer effect
 			layout(matrix(1:(length(glob_levels)*length(peer_levels)),
-							nrow=length(glob_levels), byrow=TRUE))
+						nrow=length(glob_levels), byrow=TRUE))
 			par(family="serif", mar=c(3.5,4,2.5,1.5), las=1)
 
-			# 	Ticks helper (Dataplot-style)
+			#  Ticks helper (Dataplot-style)
 			dataplot_tick_function <- function(major_tick_length=0.035, minor_tick_ratio=0.25){
-				# 	Check if Hmisc is Present. If not, install it.
-					packages <- c('Hmisc')
-					install.packages(setdiff(packages, rownames(installed.packages()))) 
-											
-				# 	Add Dataplot Style- Through Tick Marks to Plot
-					Hmisc::minor.tick(nx = 2, ny = 2, tick.ratio = minor_tick_ratio)  
-					Hmisc::minor.tick(nx = 2, ny = 2, tick.ratio = -minor_tick_ratio)  
-					axis(2, tck=1, tck=-major_tick_length, labels = FALSE)
-					axis(1, tck=1, tck=-major_tick_length, labels = FALSE)
+			packages <- c('Hmisc')
+			missing <- setdiff(packages, rownames(installed.packages()))
+			if (length(missing) > 0) install.packages(missing, repos = "https://cloud.r-project.org")
+			Hmisc::minor.tick(nx = 2, ny = 2, tick.ratio = minor_tick_ratio)
+			Hmisc::minor.tick(nx = 2, ny = 2, tick.ratio = -minor_tick_ratio)
+			axis(2, tck=1, tck=-major_tick_length, labels = FALSE)
+			axis(1, tck=1, tck=-major_tick_length, labels = FALSE)
 			}
 
-			# 	Color palette for Symptomatic lines
+			#  Color palette for Symptomatic lines
 			pal_base <- c("#66CCEE", "#228833", "#CCBB44", "#EE6677", "#AA3377", "#4477AA", "#BBBBBB")
 			if (length(self_levels) <= length(pal_base)) {
 			pal <- pal_base[seq_along(self_levels)]
@@ -1024,65 +1021,43 @@ using diffustion_sim
 			pal <- grDevices::colorRampPalette(pal_base)(length(self_levels))
 			}
 
-			# 	Panels
-				for (gi in seq_along(glob_levels)) {
-					gval <- glob_levels[gi]
-					for (pi in seq_along(peer_levels)) {
-						# 	Slice panel data
-							pval <- peer_levels[pi]
-							sub  <- df[df[["b_cxn_global"]] == gval & df[["b_cxn_peer"]] == pval, ]
+			#  Panels
+			for (gi in seq_along(glob_levels)) {
+			gval <- glob_levels[gi]
+			for (pi in seq_along(peer_levels)) {
+				#  Slice panel data
+				pval <- peer_levels[pi]
+				sub  <- df[df[["b_cxn_global"]] == gval & df[["b_cxn_peer"]] == pval, ]
 
-							ylim <- range(c(sub[[ col_j ]], sub[[ col_s ]]), na.rm=TRUE)
-							ylim[1] <- min(0, ylim[1])
+				ylim <- range(c(sub[[ col_j ]], sub[[ col_s ]]), na.rm=TRUE)
+				ylim[1] <- min(0, ylim[1])
 
-						#	Base plot
-							plot(NA, type="n",
-								xlim=range(sub[["time"]], na.rm=TRUE), ylim=ylim,
-								xlab="Time", ylab=ylab, tck=0.015, xaxt='n', bty='L', las=1,
-								main=paste0("Peer effect = ", sprintf("%.2f", pval),
-											"   |   Global effect = ", sprintf("%.2f", gval)))
-							axis(1, padj=0.75, tck=0.015)
-							dataplot_tick_function()
+				#  Base plot
+				plot(NA, type="n",
+					xlim=range(sub[["time"]], na.rm=TRUE), ylim=ylim,
+					xlab=" ", ylab=ylab, tck=0.015, xaxt='n', bty='L', las=1,
+					main=paste0("Peer effect = ", sprintf("%.2f", pval),
+								"   |   Global effect = ", sprintf("%.2f", gval)))
+				mtext(side = 1, text = 'Time', col = "black", line = 2.45, cex = 0.75, family='serif')
+				axis(1, padj=0.75, tck=0.015)
+				dataplot_tick_function()
 
-						# 	Lines by symptomatic (self) level
-							for (si in seq_along(self_levels)) {
-								#	Isolating Elements
-									sval <- self_levels[si]
-									ss <- sub[sub[["b_self"]] == sval, ]
-									ss <- ss[order(ss[["time"]]), ]
+				#  Lines by symptomatic (self) level
+				for (si in seq_along(self_levels)) {
+				sval <- self_levels[si]
+				ss <- sub[sub[["b_self"]] == sval, ]
+				ss <- ss[order(ss[["time"]]), ]
 
-								# 	Julia (solid)
-									lines(ss[["time"]], ss[[ col_j ]], col=pal[si], lwd=2, lty=1)
+				#  Julia (solid)
+				lines(ss[["time"]], ss[[ col_j ]], col=pal[si], lwd=2, lty=1)
 
-								# 	SAS (dashed)
-									lines(ss[["time"]], ss[[ col_s ]], col=pal[si], lwd=2, lty=2)
-							}
-
-							# Legend on last panel
-							#if (gi == length(glob_levels) && pi == length(peer_levels)) {
-							#leg_lbls <- c(paste0("Symptomatic = ", sprintf("%.2f", self_levels)),
-							#				"Julia median", "SAS median")
-							#leg_col  <- c(pal, "black", "black")
-							#leg_lty  <- c(rep(1, length(self_levels)), 1, 2)
-							#leg_lwd  <- c(rep(2, length(self_levels)), 2, 2)
-							#legend("topright", legend=leg_lbls, col=leg_col, lty=leg_lty, lwd=leg_lwd,
-							#		cex=0.85, bty="n")
-							#}
-					}
+				#  SAS (dashed)
+				lines(ss[["time"]], ss[[ col_s ]], col=pal[si], lwd=2, lty=2)
 				}
+			}
+			}
 
-			# 	Title row
-				#par(mar = c(0, 0, 0, 0), bty = "n")
-				#plot(0, type = "n", xlab = " ", ylab = " ", xaxt = "n", yaxt = "n", main = " ")
-				#text(x = 0.5, y = 0.7, labels = ttl, cex = 1.8, family = "serif", font = 2)
-				#text(x = 0.5, y = 0.4, labels = subt, cex = 1.0, family = "serif")
-
-				# Bottom annotation of constants
-				#par(mar = c(0, 0, 0, 0), bty = "n")
-				#plot(0, type = "n", xlab = " ", ylab = " ", xaxt = "n", yaxt = "n", main = " ")
-				#text(x = 0.5, y = 0.5, labels = param, cex = 1.1, family = "serif")
-
-			#	Saving
+			#  Saving
 			if (!is.null(spath)) dev.off()
 			"""
 
@@ -1477,7 +1452,6 @@ using diffustion_sim
 #   Comparisative Tests: Replication Analysis
 
 #   Load network from GraphML file
-#	network_data = sim_prep("/workspace/data/sim_test_data/WeakCore1_3.2_2.graphml", sas_transformation=false)
 	network_data = sim_prep("/workspace/data/sim_test_data/WeakCore1_3.2_2.graphml", sas_transformation=true)
 	alst = network_data.alst
 	vlst = network_data.vlst
@@ -1509,516 +1483,589 @@ using diffustion_sim
 #   DIAGNOSTIC TESTS   #
 ########################
 
-#	Neighbor Uniqueness Audit
-	function audit_unique_neighbors(alst::Union{Matrix{Int}, Vector{Vector{Int}}})
+#	Trace Analysis
+
+#	Load SAS Trace CSV
+	function load_sas_trace(sas_log::AbstractString)::DataFrame
 		"""
 		Args:
-			alst: same `alst` you feed to `sirdif`.
+			sas_log::AbstractString: Path to SIR_SocialFeedback_Infection_Log.csv
 		Returns:
-			NamedTuple: (ok::Bool, offenders::Vector{Int})
+			DataFrame: All attempt-level rows with correct column types
 		Notes:
-			Flags rows whose neighbor list contains duplicates.
+			Requires CSV.jl and DataFrames.jl.
 		"""
-		#	Matrix → neighbors
-			getrow(i) = alst isa Matrix ? alst[i, 2:end] : alst[i][2:end]
-		#	Check all rows
-			off = Int[]
-			n = alst isa Matrix ? size(alst,1) : length(alst)
-			for i in 1:n
-				row = getrow(i)
-				nz  = row[row .> 0]
-				if length(nz) != length(unique(nz))
-					push!(off, i)
+		#	Read the CSV.
+			df = CSV.read(sas_log, DataFrame; normalizenames=true)
+
+		#	Coerce expected numeric columns (robust to SAS formatting).
+			numcols = [:IT,:T,:J,:EGO,:K,:COLPOS,:ALTER,:EDGWGT,:PEERSINF,:NINF,
+			           :ISSYMPTOMATIC,:LWACT,:PROB_ACT,:ACTIVE,:TRANPROB,:TRANS,
+			           :BECAME_INFECTED,:NBRS]
+			for c in numcols
+				if c ∈ names(df)
+					df[!, c] = parse.(Float64, string.(df[!, c]))
 				end
 			end
-			return (ok = isempty(off), offenders = off)
+
+		#	Cast integer-like columns to Int (no rounding, just trunc).
+			intcols = [:IT,:T,:J,:EGO,:K,:COLPOS,:ALTER,:PEERSINF,:NINF,
+			           :ISSYMPTOMATIC,:ACTIVE,:TRANS,:BECAME_INFECTED,:NBRS]
+			for c in intcols
+				if c ∈ names(df)
+					df[!, c] = Int.(df[!, c])
+				end
+			end
+
+		#	Return.
+			return df
 	end
 
-	res = audit_unique_neighbors(alst)
-	@show res.ok
-	if !res.ok
-		println("Neighbor-dup offenders (showing up to 20):")
-		println(res.offenders[1:min(end,20)])
+	sas_log = "/workspace/data/sim_test_data/SIR_SocialFeedback_Infection_Log.csv"
+	df = load_sas_trace(sas_log)
+	size(df), names(df)
+
+#	Basic Sanity Checks
+	function trace_sanity_checks(df; beta::Float64, atol::Float64=1e-9)
+		# 	Expected PROB_ACT from LWACT
+			expected_prob = 1.0 ./ (1.0 .+ exp.(-df.LWACT))
+			prob_err = abs.(df.PROB_ACT .- expected_prob)
+			max_prob_err = maximum(skipmissing(prob_err))
+			ok_prob = max_prob_err ≤ atol
+
+		# 	Expected TRANPROB from beta and EDGWGT
+			expected_tranprob = 1 .- (1 .- beta) .^ df.EDGWGT
+			tran_err = abs.(df.TRANPROB .- expected_tranprob)
+			max_tran_err = maximum(skipmissing(tran_err))
+			ok_tran = max_tran_err ≤ atol
+
+		# 	BECAME_INFECTED logic
+			ok_became = all(df.BECAME_INFECTED .== ((df.ACTIVE .== 1) .& (df.TRANS .== 1)))
+
+		return (
+			ok_prob_act = ok_prob,
+			ok_tranprob = ok_tran,
+			ok_became   = ok_became,
+			max_abs_prob_err     = max_prob_err,
+			max_abs_tranprob_err = max_tran_err
+		)
 	end
 
-#	SIR Diffusion Audit Trace
-	function sirdif_audit(
-		alst::Union{Matrix{Int}, Vector{Vector{Int}}},
-		vlst::Union{Matrix{Float64}, Vector{Vector{Float64}}},
-		infectedp::Vector{Int}, inf_r::Float64, rec_t::Int,
-		maxtime::Int, p_symp::Float64, b_int::Float64,
-		b_close::Float64, b_cxn_peers::Float64, b_cxn_total::Float64,
-		b_cxn_symp::Float64, b_cls_x_smp::Float64;
-		transmission_method::Symbol = :weighted,
-		immunity_duration::Union{Int,Nothing} = nothing
+	β = 0.02
+	checks = trace_sanity_checks(df; beta=β)
+	println(checks)
+	@assert checks.ok_prob_act "PROB_ACT != logistic(LWACT)"
+	@assert checks.ok_tranprob "TRANPROB != 1 - (1-β)^EDGWGT"
+	@assert checks.ok_became "BECAME_INFECTED != (ACTIVE==1 && TRANS==1)"
+
+#	Attempt Coverage Check
+	function trace_attempt_coverage(df::DataFrame)::Bool
+		"""
+		Args:
+			df::DataFrame: Trace data
+		Returns:
+			Bool: true if within each (IT,T,J) group, maximum K equals NBRS exactly
+		Notes:
+			Assures we logged every neighbor attempt per ego/day.
+		"""
+		#	Group by (IT,T,J).
+			g = groupby(df, [:IT,:T,:J])
+		#	Check K coverage equals NBRS.
+			all_ok = true
+			for sub in g
+				maxK = maximum(sub.K)
+				nb   = first(sub.NBRS)
+				if maxK != nb
+					all_ok = false
+					break
+				end
+			end
+			return all_ok
+	end
+
+	coverage_ok = trace_attempt_coverage(df)
+	println(("attempt_coverage" => coverage_ok))
+	@assert coverage_ok "Trace is missing some neighbor attempts (K != NBRS)."
+
+#	Build Fast Trace Index
+	function build_trace_index(df::DataFrame)
+		"""
+		Args:
+			df::DataFrame: Trace data
+		Returns:
+			Dict{NTuple{4,Int},NamedTuple}: key=(it,t,ego,colpos) → values for override
+		Notes:
+			Use COLPOS (not K) to align with SAS column order in s_alst[ego,].
+		"""
+		#	Select only fields needed at lookup sites.
+			idx = Dict{NTuple{4,Int},NamedTuple}()
+			for row in eachrow(df)
+				key = (row.IT, row.T, row.EGO, row.COLPOS)
+				val = (active = row.ACTIVE,
+				       trans  = row.TRANS,
+				       issymp = row.ISSYMPTOMATIC,
+				       edgwgt = row.EDGWGT,
+				       peers  = row.PEERSINF,
+				       ninf   = row.NINF)
+				idx[key] = val
+			end
+			return idx
+	end
+
+	idx = build_trace_index(df)
+	length(idx)
+
+#	Lookup Attempt From Index
+	function trace_lookup(idx::Dict{NTuple{4,Int},NamedTuple}, it::Int, t::Int, ego::Int, colpos::Int)
+		"""
+		Args:
+			idx::Dict: From `build_trace_index`
+			it::Int: Iteration
+			t::Int: Day
+			ego::Int: Ego node id (SAS EGO)
+			colpos::Int: Column position in SAS s_alst[ego,]
+		Returns:
+			NamedTuple: (active::Int, trans::Int, issymp::Int, edgwgt::Float64, peers::Int, ninf::Int)
+		Notes:
+			Throws a KeyError if the attempt isn’t in the trace.
+		"""
+		#	Strict retrieval.
+			return idx[(it,t,ego,colpos)]
+	end
+                
+#	Attempts For One Ego/Day
+	function attempts_for_ego(df::DataFrame, it::Int, t::Int, ego::Int)::DataFrame
+		"""
+		Args:
+			df::DataFrame: Trace data
+			it,t,ego: Selection keys
+		Returns:
+			DataFrame: Attempts sorted by K (scan order)
+		Notes:
+			Useful for quick spot checks.
+		"""
+		#	Filter and sort by K.
+			sub = filter(r -> r.IT==it && r.T==t && r.EGO==ego, df)
+			sort!(sub, [:K])
+			return sub
+	end
+
+	sub_584 = attempts_for_ego(df, 1, 1, 584)  # returns attempts sorted by K
+	first(sub_584, 10)  
+
+	if nrow(sub_584) > 0
+		colpos1 = sub_584.COLPOS[1]
+		trace_lookup(idx, 1, 1, 584, colpos1)
+	end
+
+#	Recompute LWACT/PROB_ACT For Audit
+	function recompute_scores(alst::Matrix{Int64}, df::DataFrame;
+		b_int::Float64,
+		b_close::Float64,
+		b_cxn_peers::Float64,
+		b_cxn_total::Float64,
+		b_cxn_symp::Float64,
+		b_cls_x_smp::Float64)::NamedTuple
+		"""
+		Args:
+			df::DataFrame: Trace data
+			…: Model coefficients
+		Returns:
+			NamedTuple: (max_abs_lwact_diff, max_abs_prob_diff)
+		Notes:
+			Uses PEERSINF and NINF columns straight from the trace.
+		"""
+		#	Set Parameters
+			n_const = length(unique(alst[:,1]))
+			global_scale = Float64.(df.NINF) ./ (n_const / 3)
+
+		#	Recompute.
+			lw = b_int .+
+				 b_cxn_symp .* Float64.(df.ISSYMPTOMATIC) .+
+				 b_close     .* df.EDGWGT .+
+				 b_cxn_peers .* Float64.(df.PEERSINF) .+
+				 b_cxn_total .* global_scale .+
+				 b_cls_x_smp .* Float64.(df.PEERSINF) .* Float64.(df.ISSYMPTOMATIC)
+
+			prob = 1.0 ./ (1.0 .+ exp.(-lw))
+
+			max_lw = maximum(abs.(lw .- df.LWACT))
+			max_pb = maximum(abs.(prob .- df.PROB_ACT))
+
+			return (max_abs_lwact_diff = max_lw,
+			        max_abs_prob_diff  = max_pb)
+	end
+
+	b_int         = -0.1
+	b_close       =  1.0
+	b_cxn_peers   = -1.0
+	b_cxn_total   = -6.50
+	b_cxn_symp    = -1.5
+	b_cls_x_smp   = -0.1
+	audit = recompute_scores(alst, df;
+		b_int=b_int, b_close=b_close, b_cxn_peers=b_cxn_peers,
+		b_cxn_total=b_cxn_total, b_cxn_symp=b_cxn_symp, b_cls_x_smp=b_cls_x_smp)
+	println(audit)
+
+	by_day = combine(groupby(df, :T),
+		nrow                 => :n_attempts,
+		:ACTIVE             => sum => :n_activated,
+		:BECAME_INFECTED    => sum => :n_transmitted,
 	)
-		"""
-		Args:
-			alst, vlst, infectedp, inf_r, rec_t, maxtime, p_symp, b_int, b_close,
-			b_cxn_peers, b_cxn_total, b_cxn_symp, b_cls_x_smp: same as `sirdif`.
-			transmission_method, immunity_duration: same as `sirdif`.
-		Returns:
-			NamedTuple with:
-				events::DataFrame                 # (t, ego_id, alter_id, activated, transmitted, edgwgt, peersinf_at_contact, prob_act, tranprob)
-				daily_peer_increments::DataFrame  # (t, alter_id, delta_peersinf, contributing_egos::Vector{Int})
-				per_ego_transmissions::Dict{Int,Int}
-				final_state::Matrix{Int}
-		Notes:
-			Trace-only: no logic/rand changes vs `sirdif`. Recording happens *after* the same draws.
-		"""
 
-		#	Dependencies for tabular outputs
-			#	(ensure `using DataFrames` in your session)
-			@assert Base.find_package("DataFrames") !== nothing "Please `using DataFrames` before calling sirdif_audit()"
+	by_it_day = combine(groupby(df, [:IT, :T]),
+		nrow                 => :n_attempts,
+		:ACTIVE             => sum => :n_activated,
+		:BECAME_INFECTED    => sum => :n_transmitted,
+	)
 
-		#	Cache n from the input (SAS-aligned)
-			if alst isa Matrix{Int}
-				n_nodes = size(alst, 1)
-			else
-				n_nodes = length(alst)
-			end
+	transform!(by_it_day,
+		[:n_activated, :n_attempts]   => ((a,n)->a./n) => :activation_rate,
+		[:n_transmitted, :n_attempts] => ((x,n)->x./n) => :transmission_rate,
+	)
 
-		#	Matrix → vector-of-vectors (drop zeros), collect ids
-			if alst isa Matrix{Int}
-				alst_vec   = Vector{Vector{Int}}(undef, n_nodes)
-				vlst_vec   = Vector{Vector{Float64}}(undef, n_nodes)
-				unique_ids = Vector{Int}(undef, n_nodes)
-				@inbounds for i in 1:n_nodes
-					#	Extract ego and neighbors
-						ego_id        = alst[i, 1]
-						unique_ids[i] = ego_id
-						row_ids       = alst[i, 2:end]
-						row_wgts      = vlst[i, 2:end]
-						nz_mask       = row_ids .> 0
-						neighbors     = row_ids[nz_mask]
-						weights       = row_wgts[nz_mask]
-						alst_vec[i]   = [ego_id; neighbors]
-						vlst_vec[i]   = [Float64(ego_id); weights]
+# 	NINF should be constant within (IT,T)
+	const_ninf = combine(groupby(df, [:IT, :T]), :NINF => (x -> length(unique(x))) => :n_unique_ninf)
+	all(const_ninf.n_unique_ninf .== 1)
+
+#	# of egos processed that day == NINF_t0
+	egos_per_day = combine(groupby(df, [:IT, :T])) do sdf
+    	(; egos_with_attempts = length(unique(sdf.EGO)), ninf_t0 = first(sdf.NINF))
+	end
+
+	diff = egos_per_day.ninf_t0 .- egos_per_day.egos_with_attempts
+	println((
+		all_nonnegative = all(diff .>= 0),      # should be true
+		any_missing     = any(diff .> 0),       # true if some egos had no attempts
+		summary         = describe(diff)
+	))
+	
+	by_day = combine(groupby(df, [:IT,:T]),
+		:EGO => (x->length(unique(x))) => :egos_with_attempts,
+		:NINF => first => :ninf_t0,
+	)
+	by_day.diff = by_day.ninf_t0 .- by_day.egos_with_attempts
+
+	println((
+		all_nonnegative = all(by_day.diff .>= 0),
+		any_silent_days = any(by_day.diff .> 0),
+		n_silent_days   = count(>(0), by_day.diff),
+	))
+
+# 	Reconstruct I_t0 for each (IT,T) purely from the trace’s transmissions.
+# 	Seed is taken as the first EGO seen on the first day for that iteration.
+	function reconstruct_infected_sets(df::DataFrame; rec_t::Int=14)
+		sets = Dict{Tuple{Int,Int}, Set{Int}}()
+
+		for it in unique(df.IT)
+			sdf = df[df.IT .== it, :]
+			tmin = minimum(sdf.T)
+			tmax = maximum(sdf.T)
+
+			#	Seed guess: first EGO appearing on the earliest day
+				seed = first(sdf.EGO[sdf.T .== tmin])
+
+			#	Day of infection for everyone (seed is "pre-day", so treat as tmin-1)
+				tinf = Dict{Int,Int}(seed => tmin - 1)
+				for row in eachrow(sdf)
+					if row.BECAME_INFECTED == 1
+						# if someone gets infected multiple times in trace (shouldn’t), keep earliest
+						tinf[row.ALTER] = get(tinf, row.ALTER, row.T)
+					end
 				end
-			else
-				alst_vec   = Vector{Vector{Int}}(undef, n_nodes)
-				vlst_vec   = Vector{Vector{Float64}}(undef, n_nodes)
-				@inbounds for i in 1:n_nodes
-					#	Copy existing vectors
-						alst_vec[i] = alst[i]
-						vlst_vec[i] = vlst[i]
-				end
-				unique_ids = Vector{Int}(undef, n_nodes)
-				@inbounds for i in 1:n_nodes
-					#	Extract node IDs
-						unique_ids[i] = alst_vec[i][1]
-				end
-			end
 
-		#	Id → row index
-			id_to_idx = Dict{Int,Int}(unique_ids[i] => i for i in 1:n_nodes)
-
-		#	Start timing (not returned here, but harmless)
-			start_time = time()
-
-		#	State matrix: [id, I, S, R, t_rec, nbrsinf]
-			state = zeros(Int, n_nodes, 6)
-			@inbounds begin
-				state[:, 1] .= unique_ids
-				state[:, 3] .= 1
-			end
-
-		#	Column indices
-			ID_COL               = 1
-			INFECTED_COL         = 2
-			SUSCEPTIBLE_COL      = 3
-			RECOVERED_COL        = 4
-			TIME_TO_RECOVERY_COL = 5
-			NBRSINF_COL          = 6
-
-		#	Seed infections
-			@inbounds for inf_id in infectedp
-				#	Mark as infected
-					idx = id_to_idx[inf_id]
-					state[idx, INFECTED_COL]         = 1
-					state[idx, SUSCEPTIBLE_COL]      = 0
-					state[idx, TIME_TO_RECOVERY_COL] = rec_t
-			end
-
-		#	Initial neighbor exposure (before S-list pruning)
-			@inbounds for i in 1:n_nodes
-				#	Check if infected and update neighbors
-					ego_id  = alst_vec[i][1]
-					ego_row = id_to_idx[ego_id]
-					if state[ego_row, INFECTED_COL] == 1
-						for alter_id in @view alst_vec[i][2:end]
-							#	Increment neighbor's exposure count
-								alter_idx = id_to_idx[alter_id]
-								state[alter_idx, NBRSINF_COL] += 1
+			#	Build start-of-day infected sets
+				for t in tmin:tmax
+					S = Set{Int}()
+					for (node, t0) in tinf
+						# Node is infected at the start of day t if t ∈ (t0+1) … (t0+rec_t)
+						if (t >= t0 + 1) && (t <= t0 + rec_t)
+							push!(S, node)
 						end
 					end
-			end
+					sets[(it,t)] = S
+				end
+		end
 
-		#	Trace stores
-			ev_t   = Int[];   ev_ego = Int[];  ev_alt = Int[]
-			ev_act = Int[];   ev_tx  = Int[]
-			ev_wgt = Float64[]; ev_pinf = Int[]; ev_pact = Float64[]; ev_tprob = Float64[]
+		return sets
+	end
 
-			per_ego_tx = Dict{Int,Int}()  # ego_id => total successes
+	sets = reconstruct_infected_sets(df; rec_t=14)
 
-			dpi_t   = Int[]; dpi_alt = Int[]; dpi_delta = Int[]; dpi_contrib = Vector{Vector{Int}}()
+	cmp = DataFrame(IT = Int[], T = Int[], n_recon = Int[], ninf_t0 = Int[], diff = Int[])
+	for it in unique(df.IT), t in unique(df.T[df.IT .== it])
+		n_recon = length(sets[(it,t)])
+		ninf_t0 = first(unique(df.NINF[(df.IT .== it) .&& (df.T .== t)]))
+		push!(cmp, (it, t, n_recon, ninf_t0, n_recon - ninf_t0))
+	end
 
-		#	Main loop
-			@inbounds for t in 1:maxtime
-				#	Create susceptible mask for this timestep (mimics SAS s_alst)
-					susceptible_mask = copy(state[:, SUSCEPTIBLE_COL])
+	println((
+		all_match = all(cmp.diff .== 0),
+		n_mismatched_days = count(!=(0), cmp.diff),
+	))
 
-				#	Collect infected indices at start of timestep (fixed order like SAS)
-					infected_indices = Int[]
-					ninf = 0
-					for i in 1:n_nodes
-						#	Count and collect infected
-							if state[i, INFECTED_COL] == 1
-								push!(infected_indices, i)
-								ninf += 1
+# 	Check monotone (non-decreasing) PEERSINF across K within (IT,T,EGO),
+# 	and whether it steps up immediately after a success.
+	function audit_within_day_peers(df::DataFrame)
+		g = groupby(df, [:IT, :T, :EGO])
+		n_groups = length(g)
+		monotone_ok = 0
+		step_ups = 0
+		step_ups_follow_success = 0
+		total_successes = 0
+
+		for sdf in g
+			#	Defining Parameters
+				sort!(sdf, [:K])  # ensure inner-loop order
+				p = sdf.PEERSINF
+				b = sdf.BECAME_INFECTED
+
+			# 	monotone non-decreasing across K?
+				if all(Base.diff(p) .>= 0)
+					monotone_ok += 1
+				end
+
+				d = Base.diff(p)
+				step_ups += count(>(0), d)
+
+				succ_idx = findall(==(1), b)
+				total_successes += length(succ_idx)
+				for si in succ_idx
+					if si < nrow(sdf) && p[si+1] > p[si]
+						step_ups_follow_success += 1
+					end
+				end
+		end
+
+		return (
+			groups = n_groups,
+			groups_monotone = monotone_ok,
+			share_monotone = n_groups == 0 ? NaN : monotone_ok / n_groups,
+			step_ups = step_ups,
+			total_successes = total_successes,
+			step_ups_follow_success = step_ups_follow_success,
+		)
+	end
+
+	audit_within_day_peers(df)
+
+#	Check 1: PEERSINF persistence across days
+	function check_peersinf_persistence(df::DataFrame)
+		# 	Group by IT and ALTER
+			grouped = groupby(df, [:IT, :ALTER])
+		
+			alters_multi_day = 0
+			any_decrease = false
+			max_peers = 0
+		
+		#	Looping over the Grouped Dataset
+			for grp in grouped
+				#	Get unique days for this group
+					days = sort(unique(grp.T))
+				
+					if length(days) > 1
+						alters_multi_day += 1
+						
+						# Get first PEERSINF value for each day
+						first_vals = Int[]
+						for d in days
+							day_rows = grp[grp.T .== d, :]
+							if nrow(day_rows) > 0
+								push!(first_vals, day_rows.PEERSINF[1])
 							end
-					end
-
-				#	Padding/break if epidemic ended (no events to trace)
-					if ninf == 0
-						break
-					end
-
-				#	Per-day accumulation for peer-increment audit
-					daily_delta = Dict{Int,Int}()         # alter_id => total +1’s applied today
-					daily_contr = Dict{Int,Set{Int}}()    # alter_id => set(ego_ids) that contributed today
-
-				#	Process infected nodes in fixed order (matches SAS loop)
-					for ego_idx in infected_indices
-						#	Get ego's neighbors and weights
-							neighbors = alst_vec[ego_idx]
-							weights   = vlst_vec[ego_idx]
-							issympt   = rand() < p_symp ? 1 : 0
-
-						#	Scan susceptible alters (skip ego at position 1)
-							for (alter_id, edgwgt) in zip(@view(neighbors[2:end]), @view(weights[2:end]))
-								#	Check susceptibility from mask
-									alter_idx = id_to_idx[alter_id]
-
-								#	Check against MASK not current state (mimics SAS s_alst check)
-									if susceptible_mask[alter_idx] != 1
-										continue
-									end
-
-								peersinf = state[alter_idx, NBRSINF_COL]
-
-								#	SAS-aligned activation
-									lwact    = b_int +
-										(issympt * b_cxn_symp) +
-										(b_close * edgwgt) +
-										(b_cxn_peers * peersinf) +
-										(b_cxn_total * (ninf / (n_nodes / 3))) +
-										(b_cls_x_smp * peersinf * issympt)
-									prob_act = exp(lwact) / (1 + exp(lwact))
-
-								#	Activation and transmission (record after draws)
-									activated = (rand() < prob_act)
-									transmitted = false
-									tranprob = transmission_method === :weighted ?
-										(1 - (1 - inf_r)^edgwgt) : inf_r
-
-									if activated
-										#	transmission draw
-											if rand() < tranprob
-												transmitted = true
-												#	Update state AND mask (critical for preventing double infection)
-													state[alter_idx, INFECTED_COL]         = 1
-													state[alter_idx, SUSCEPTIBLE_COL]      = 0
-													susceptible_mask[alter_idx]            = 0
-													state[alter_idx, TIME_TO_RECOVERY_COL] = rec_t
-
-												#	Update nbrsinf for ego's neighbors
-													for nbr_id in @view neighbors[2:end]
-														#	Increment exposure count
-															nbr_idx = id_to_idx[nbr_id]
-															state[nbr_idx, NBRSINF_COL] += 1
-															daily_delta[nbr_id] = get(daily_delta, nbr_id, 0) + 1
-															if !haskey(daily_contr, nbr_id)
-																daily_contr[nbr_id] = Set{Int}()
-															end
-															push!(daily_contr[nbr_id], neighbors[1])  # ego_id
-													end
-
-												#	Count success by ego
-													ego_id = neighbors[1]
-													per_ego_tx[ego_id] = get(per_ego_tx, ego_id, 0) + 1
-											end
-									end
-
-								#	Record event (once per ego→alter contact scanned)
-									push!(ev_t, t)
-									push!(ev_ego, neighbors[1])
-									push!(ev_alt, alter_id)
-									push!(ev_act, activated ? 1 : 0)
-									push!(ev_tx, transmitted ? 1 : 0)
-									push!(ev_wgt, edgwgt)
-									push!(ev_pinf, peersinf)
-									push!(ev_pact, prob_act)
-									push!(ev_tprob, tranprob)
-							end
-
-						#	Recovery countdown
-							state[ego_idx, TIME_TO_RECOVERY_COL] -= 1
-					end
-
-				#	Emit per-day peer-increment summary rows
-					for (aid, delta) in daily_delta
-						contrib_vec = sort!(collect(get(daily_contr, aid, Set{Int}())))
-						push!(dpi_t, t)
-						push!(dpi_alt, aid)
-						push!(dpi_delta, delta)
-						push!(dpi_contrib, contrib_vec)
-					end
-
-				#	Move to recovered
-					for i in 1:n_nodes
-						#	Check for recovery
-							if state[i, TIME_TO_RECOVERY_COL] == 0 && state[i, INFECTED_COL] == 1
-								state[i, INFECTED_COL]         = 0
-								state[i, RECOVERED_COL]        = 1
-								state[i, TIME_TO_RECOVERY_COL] = 0
-								if immunity_duration !== nothing
-									state[i, TIME_TO_RECOVERY_COL] = -immunity_duration
+						end
+						
+						# Check for decreases
+						if length(first_vals) > 1
+							for i in 2:length(first_vals)
+								if first_vals[i] < first_vals[i-1]
+									any_decrease = true
+									break
 								end
 							end
+						end
 					end
-
-				#	SIRS waning immunity (kept for parity; no extra RNG)
-					if immunity_duration !== nothing
-						#	Tick immunity timers (negative → 0)
-							for i in 1:n_nodes
-								#	Increment timer toward zero
-									if state[i, TIME_TO_RECOVERY_COL] < 0 && state[i, RECOVERED_COL] == 1
-										state[i, TIME_TO_RECOVERY_COL] += 1
-									end
-							end
-						#	When timer hits 0 while recovered → back to susceptible
-							for i in 1:n_nodes
-								#	Check for immunity expiration
-									if state[i, TIME_TO_RECOVERY_COL] == 0 && state[i, RECOVERED_COL] == 1
-										state[i, RECOVERED_COL]   = 0
-										state[i, SUSCEPTIBLE_COL] = 1
-									end
-							end
+				
+				# 	Track max PEERSINF
+					if length(grp.PEERSINF) > 0
+						max_peers = max(max_peers, maximum(grp.PEERSINF))
 					end
 			end
-
-		#	Assemble DataFrames (events, daily increments)
-			ev_df = DataFrame(
-				t = ev_t, ego_id = ev_ego, alter_id = ev_alt,
-				activated = ev_act, transmitted = ev_tx,
-				edgwgt = ev_wgt, peersinf_at_contact = ev_pinf,
-				prob_act = ev_pact, tranprob = ev_tprob
-			)
-
-			dpi_df = DataFrame(
-				t = dpi_t, alter_id = dpi_alt,
-				delta_peersinf = dpi_delta,
-				contributing_egos = dpi_contrib
-			)
-
-		#	Return trace bundle
+		
+		#	Return Results
 			return (
-				events = ev_df,
-				daily_peer_increments = dpi_df,
-				per_ego_transmissions = per_ego_tx,
-				final_state = state,
+				alters_seen_multiple_days = alters_multi_day,
+				any_alter_sees_decrease = any_decrease,
+				max_peersinf_observed = max_peers
+			)
+	end
+	persistence_check = check_peersinf_persistence(df)
+	println("PEERSINF Persistence Check:")
+	println(persistence_check)
+
+#	Check 2: Verify ego's neighbors get updated on transmission
+	function check_neighbor_updates(df::DataFrame)
+		"""
+		When ego successfully transmits, do ALL ego's future attempts 
+		show increased PEERSINF?
+		"""
+		transmissions = df[df.BECAME_INFECTED .== 1, :]
+		
+		updates_found = 0
+		updates_expected = 0
+		
+		for row in eachrow(transmissions[1:min(10, nrow(transmissions)), :])
+			# Find ego's subsequent attempts same day
+			post_trans = df[(df.IT .== row.IT) .& 
+					       (df.T .== row.T) .& 
+					       (df.EGO .== row.EGO) .& 
+					       (df.K .> row.K), :]
+			
+			if nrow(post_trans) > 0
+				# Did PEERSINF increase for remaining neighbors?
+				increases = post_trans.PEERSINF .> row.PEERSINF
+				updates_found += sum(increases)
+				updates_expected += nrow(post_trans)
+			end
+		end
+		
+		return (
+			updates_found = updates_found,
+			updates_expected = updates_expected,
+			update_rate = updates_expected > 0 ? updates_found/updates_expected : NaN
+		)
+	end
+
+	neighbor_update_check = check_neighbor_updates(df)
+	println("\nNeighbor Update Check:")
+	println(neighbor_update_check)
+
+# 	Find a transmission event and trace what happens
+	function trace_transmission_example(df::DataFrame)
+		# 	Find first transmission
+			trans = df[df.BECAME_INFECTED .== 1, :]
+			if nrow(trans) == 0
+				return nothing
+			end
+		
+		# 	Take first transmission
+			t_row = trans[1, :]
+		
+			println("Transmission Example:")
+			println("  IT=$(t_row.IT), T=$(t_row.T), EGO=$(t_row.EGO) -> ALTER=$(t_row.ALTER)")
+			println("  At K=$(t_row.K) with PEERSINF=$(t_row.PEERSINF)")
+			
+		# 	Get all of ego's attempts that day
+			ego_day = df[(df.IT .== t_row.IT) .& (df.T .== t_row.T) .& (df.EGO .== t_row.EGO), :]
+			sort!(ego_day, :K)
+			
+			println("\nEgo's attempts that day:")
+			for row in eachrow(ego_day)
+				marker = row.K == t_row.K ? " <- TRANSMISSION HERE" : ""
+				println("  K=$(row.K): ALTER=$(row.ALTER), PEERSINF=$(row.PEERSINF)$marker")
+			end
+		
+		#	Return Ego Trace
+			return ego_day
+	end
+
+	example = trace_transmission_example(df)
+
+# 	Check 3: Verify that infected nodes stop appearing as EGO
+	function check_infected_stop_transmitting(df::DataFrame)
+		"""
+		Once someone recovers (after 14 days), do they stop appearing as EGO?
+		"""
+		# 	Track when each node was infected and when they last appeared as ego
+			ego_history = combine(groupby(df, [:IT, :EGO])) do sdf
+				first_day = minimum(sdf.T)
+				last_day = maximum(sdf.T)
+				got_infected = any(sdf[sdf.T .== first_day, :].ALTER .∈ 
+								Ref(df[(df.IT .== first(sdf.IT)) .& 
+										(df.BECAME_INFECTED .== 1), :ALTER]))
+				DataFrame(
+					first_ego_day = first_day,
+					last_ego_day = last_day,
+					ego_duration = last_day - first_day + 1,
+					was_seed = first_day == 1
+				)
+			end
+		
+		# 	Check if ego duration matches recovery time
+			expected_duration = 14  # recovery time
+			durations = ego_history[.!ego_history.was_seed, :ego_duration]
+			
+		return (
+			mean_ego_duration = mean(durations),
+			max_ego_duration = maximum(durations),
+			all_stop_by_14 = all(durations .<= expected_duration)
+		)
+	end
+
+# 	Check 4: Verify global effect calculation
+	function check_global_effect(df::DataFrame, n_nodes::Int)
+		"""
+		Verify that NINF / (n/3) matches our understanding
+		"""
+		# 	Check unique NINF values per day
+			ninf_by_day = combine(groupby(df, [:IT, :T]), 
+								:NINF => unique => :ninf_values)
+		
+		# 	Calculate what global effect should be
+			expected_scale = n_nodes / 3
+		
+		# 	Sample some calculations
+			sample = df[1:min(100, nrow(df)), :]
+			sample.global_effect = sample.NINF ./ expected_scale
+		
+			return (
+				all_ninf_consistent = all(length.(ninf_by_day.ninf_values) .== 1),
+				expected_divisor = expected_scale,
+				sample_global_effects = first(sample.global_effect, 10)
 			)
 	end
 
-# 	Pick a stable seed and one seed node
-	using Random
-	Random.seed!(12345)
-	seednode = 1  # or any valid id/row index from your network
-
-# 	run the traced variant (no logic change; just emits per-day increments)
-	trace = sirdif_audit(
-		alst, vlst, [seednode],
-		0.02, 14, 30,           # inf_r, rec_t, maxtime
-		0.75,                   # p_symp
-		-0.1, 1.0,              # b_int, b_close
-		-0.5, -3.5, -1.5, -0.1; # b_cxn_peers, b_cxn_total, b_cxn_symp, b_cls_x_smp
-		transmission_method = :weighted,
-		immunity_duration   = nothing
-	)
-
-# 	quick looks at what the trace captured
-	first(trace.daily_peer_increments, 10)   # (t, alter_id, delta_peersinf, egos_that_contributed)
-	first(trace.per_ego_transmissions, 10)   # (ego_id, total_successes_over_run)
-	first(trace.events, 10)                  # (t, ego_id, alter_id, transmitted::Bool)
-
-# 	successes per day for ego 1
-	ev = trace.events
-	s = subset(ev,
-           :ego_id      => ByRow(==(1)),
-           :transmitted => ByRow(==(1)))
-	succ_by_day = combine(groupby(s, :t), nrow => :succ)
-
-
-# 	keep rows where 1 ∈ contributing_egos (note: NOT v == [1])
-	dpi = trace.daily_peer_increments
-	dpi1 = subset(dpi, :contributing_egos => ByRow(v -> 1 in v))
-
-# 	summarize to one delta per day; also record how many distinct deltas occurred (should be 1)
-	deltas_by_day = combine(groupby(dpi1, :t)) do g
-		u = unique(g.delta_peersinf)
-		(delta = length(u) == 1 ? u[1] : missing,
-		nlevels = length(u))
-	end
-
-# 	Quick view of Successes & Divergences
-	check = leftjoin(succ_by_day, deltas_by_day, on = :t)
-	first(check, 10)
-
-# 	sanity assertions (optional)
-	@assert all(coalesce.(check.nlevels .== 1, false))  "Multiple delta levels in a day — investigate"
-	@assert all(coalesce.(check.succ .== check.delta, false)) "Delta != success count for some day"
-
-#	Peersinf Upper Bound Audit (post-run)
-	function audit_peersinf_bounds(alst, state, per_ego_transmissions::Dict{Int,Int})
+# 	Check 5: Verify infection order processing
+	function check_infection_order(df::DataFrame)
 		"""
-		Args:
-			alst: network (same you used)
-			state: final_state from sirdif (we only need ids)
-			per_ego_transmissions: map ego_id => total # successful transmissions (accumulated over whole run)
-		Returns:
-			DataFrame: each row (node_id, peersinf_bound, peersinf_seen, ok)
-		Notes:
-			Bound = (# initially infected neighbors) + sum(transmissions by those neighbors).
-			If peersinf_seen > bound anywhere, you have a double-count.
+		Are infected nodes processed in a consistent order each day?
 		"""
-		#	ID list
-			ids = alst isa Matrix ? vec(alst[:,1]) : [row[1] for row in alst]
-			id_to_idx = Dict(ids[i]=>i for i=1:length(ids))
-
-		#	Neighbor function
-			getnbrs(i) = alst isa Matrix ? [x for x in alst[i,2:end] if x>0] : alst[i][2:end]
-
-		#	Compute bound
-			rows = Int[]
-			seen = Int[]
-			bnds = Int[]
-			oks  = Bool[]
-			for id in ids
-				#	Isolate ego & Neighbors
-					i = id_to_idx[id]
-					nbrs = getnbrs(i)
-
-				# 	initial infected neighbors (at t0): we don't have t0 state here, so use a conservative proxy = 0
-				# 	(safe, because we only want to catch impossible growth)
-					init_inf = 0
-					tx_sum   = sum(get(per_ego_transmissions, nb, 0) for nb in nbrs)
-					bound    = init_inf + tx_sum
-
-				#	peersinf seen lives in column 6 of `state`
-					peersinf_seen = state[i, 6]
-					push!(rows, id); push!(seen, peersinf_seen); push!(bnds, bound); push!(oks, peersinf_seen <= bound)
-			end
-
-		#	Returning Results
-			return DataFrame(node_id=rows, peersinf_seen=seen, peersinf_bound=bnds, ok=oks)
-	end
-
-	bounds_df = audit_peersinf_bounds(alst, trace.final_state, trace.per_ego_transmissions)
-
-	n_viol = sum(.!bounds_df.ok)
-	println("Audit 2 — peersinf bound violations: ", n_viol, " / ", nrow(bounds_df))
-	if n_viol > 0
-		show(first(bounds_df[.!bounds_df.ok, [:node_id, :peersinf_seen, :peersinf_bound]], 10),
-			allrows=true, allcols=true)
-	else
-		println("All nodes within bound ✓")
-	end
-
-#	Helper: count neighbors of initial seeds (t₀ bump) ---
-	function initial_infected_neighbor_counts(alst, infectedp::Vector{Int})
-		# 	ids & index map
-			ids = alst isa Matrix ? vec(alst[:,1]) : [row[1] for row in alst]
-			id2i = Dict(ids[i]=>i for i in 1:length(ids))
-			seed_idx = [id2i[id] for id in infectedp]
-
-		# 	neighbor fetcher
-			getnbrs(i) = alst isa Matrix ? filter(!=(0), alst[i,2:end]) : alst[i][2:end]
-
-		#	counts
-			cnt = zeros(Int, length(ids))
-			for si in seed_idx
-				for aid in getnbrs(si)
-					cnt[id2i[aid]] += 1
+		# For each (IT, T), get the order of EGOs
+		ego_order = combine(groupby(df, [:IT, :T])) do sdf
+			egos = Int[]
+			current_ego = 0
+			for row in eachrow(sort(sdf, [:J, :K]))
+				if row.EGO != current_ego
+					push!(egos, row.EGO)
+					current_ego = row.EGO
 				end
 			end
-			return cnt
-	end
-
-#	Corrected Audit 2: include t₀ bump ---
-	function audit_peersinf_bounds_with_t0(alst, final_state::Matrix{Int}, per_ego_tx::Dict{Int,Int}, infectedp::Vector{Int})
-		ids = alst isa Matrix ? vec(alst[:,1]) : [row[1] for row in alst]
-		id2i = Dict(ids[i]=>i for i in 1:length(ids))
-		getnbrs(i) = alst isa Matrix ? filter(!=(0), alst[i,2:end]) : alst[i][2:end]
-
-		#	t₀ neighbor bump per node
-			init_cnt = initial_infected_neighbor_counts(alst, infectedp)
-
-			rows = Int[]; seen = Int[]; bnds = Int[]; oks = Bool[]
-			for id in ids
-				i = id2i[id]
-				# successes by all of this node's neighbors across the run
-				tx_sum = sum(get(per_ego_tx, nb, 0) for nb in getnbrs(i))
-				bound  = init_cnt[i] + tx_sum
-				push!(rows, id)
-				push!(seen, final_state[i, 6])   # NBRSINF_COL
-				push!(bnds, bound)
-				push!(oks, final_state[i,6] <= bound)
-			end
-			return DataFrame(node_id=rows, peersinf_seen=seen, peersinf_bound=bnds, ok=oks)
-	end
-
-	bounds_df2 = audit_peersinf_bounds_with_t0(alst, trace.final_state, trace.per_ego_transmissions, [seednode])
-
-	n_viol2 = sum(.!bounds_df2.ok)
-	println("Audit 2 (with t₀) — peersinf bound violations: ", n_viol2, " / ", nrow(bounds_df2))
-	first(bounds_df2[.!bounds_df2.ok, [:node_id, :peersinf_seen, :peersinf_bound]], 10)
-
-#	Check for duplicate neighbors in adjacency list
-	function check_duplicate_neighbors(alst::Union{Matrix{Int}, Vector{Vector{Int}}})
-		if alst isa Matrix{Int}
-			#	For matrix format
-				for i in 1:size(alst, 1)
-					ego_id = alst[i, 1]
-					neighbors = alst[i, 2:end]
-					neighbors_nonzero = neighbors[neighbors .> 0]
-					if length(neighbors_nonzero) != length(unique(neighbors_nonzero))
-						duplicates = neighbors_nonzero[findall(x -> count(==(x), neighbors_nonzero) > 1, neighbors_nonzero)]
-						println("Node $ego_id (row $i) has duplicate neighbors: $(unique(duplicates))")
-					end
-				end
-		else
-			#	For vector of vectors format
-				for i in 1:length(alst)
-					ego_id = alst[i][1]
-					neighbors = alst[i][2:end]
-					if length(neighbors) != length(unique(neighbors))
-						duplicates = neighbors[findall(x -> count(==(x), neighbors) > 1, neighbors)]
-						println("Node $ego_id (row $i) has duplicate neighbors: $(unique(duplicates))")
-					end
-				end
-			end
-	end
-
-# 	Call this before running sirdif
-	check_duplicate_neighbors(alst)
-
-# 	Check for node ID range
-	if alst isa Matrix{Int}
-		all_ids = unique(vec(alst[:, 2:end]))
-		all_ids = all_ids[all_ids .!= 0]  # Remove padding zeros
-		println("Node ID range: $(minimum(all_ids)) to $(maximum(all_ids))")
-		if 0 in alst[:, 1]
-			println("WARNING: Node 0 exists in the network!")
+			DataFrame(ego_sequence = [egos])
 		end
+		
+		# Check if order is consistent (e.g., always ascending by ID)
+		ascending_ordered = 0
+		for row in eachrow(ego_order)
+			if length(row.ego_sequence) > 1
+				if issorted(row.ego_sequence)
+					ascending_ordered += 1
+				end
+			end
+		end
+		
+		return (
+			total_days = nrow(ego_order),
+			days_with_ascending_ego_order = ascending_ordered,
+			sample_ego_sequence = ego_order[1:min(5, nrow(ego_order)), :]
+		)
 	end
+
+# 	Run Checks 3-5
+	println("Infected Stop Transmitting Check:")
+	println(check_infected_stop_transmitting(df))
+
+	println("\nGlobal Effect Check (n_nodes = 614):")
+	println(check_global_effect(df, 614))
+
+	println("\nInfection Order Check:")
+	println(check_infection_order(df))
