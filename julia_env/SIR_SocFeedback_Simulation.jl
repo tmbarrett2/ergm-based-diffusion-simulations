@@ -26,6 +26,7 @@ using EzXML
 using ProgressMeter
 using Random
 using RCall
+using StatsBase
 using Statistics
 using diffustion_sim
 
@@ -833,25 +834,7 @@ using diffustion_sim
 		display::String = ":100",
 		save_path::Union{String,Nothing} = nothing,
 		show_plot::Bool = true,
-		seed::Union{Int,Nothing} = nothing
-	)
-		"""
-		Args:
-			alst, vlst: Network adjacency and weights (matrix or vector-of-vectors; same form).
-			inf_r::Float64: Base transmission probability per contact (β).
-			rec_t::Int: Recovery time in days.
-			maxtime::Int: Maximum simulation days (≥ 1).
-			num_iter::Int: Iterations per coefficient setting (≥ 1).
-			sas_csv_path::AbstractString: Path to SAS PROC IML output CSV.
-		Returns:
-			DataFrame: One per-time median comparison table with constants → coefficients → SAS medians → Julia medians → absolute deltas.
-		Notes:
-			- Validates exact match of (time, b_cxn_peer, b_cxn_global, b_self) grids.
-			- Facets in R: rows = Global effect, cols = Peer effect, line color = Symptomatic.
-			- Plot uses Julia solid lines vs SAS dashed lines.
-			- Bottom annotation shows constants: β, p_symp, b_int, b_close, b_cls_x_smp, rec_t, maxtime.
-		"""
-
+		seed::Union{Int,Nothing} = nothing)
 		#	Seed (optional)
 			if seed !== nothing
 				Random.seed!(seed)
@@ -860,16 +843,16 @@ using diffustion_sim
 		#	Read SAS CSV + aggregates
 			df_sas, med_time_sas, _final_per_run_sas, _med_final_sas = sas_simulation_aggregator(sas_csv_path)
 
-		#	Matching Parameters
+		#	Matching parameters from SAS file
 			num_iter_sas  = length(unique(df_sas.itter))
 			maxtime_sas   = maximum(df_sas.time)
-		
+
 		#	Run Julia simulation (shows its own progress bar)
 			df_julia = replicate_sas_simulation(alst, vlst, inf_r, rec_t, Int(maxtime_sas), num_iter_sas)
 
-		#	Aggregate Julia medians/finals 
-			julia_summ = simulation_comparer_build_julia_medians(df_julia)
-			med_time_julia = julia_summ.med_time	# :time, b_* + *_med_julia
+		#	Aggregate Julia medians/finals
+			julia_summ     = simulation_comparer_build_julia_medians(df_julia)
+			med_time_julia = julia_summ.med_time  # :time, b_* + *_med_julia
 
 		#	Harmonize SAS median column names → *_med_sas
 			rename!(med_time_sas, Dict(
@@ -879,10 +862,16 @@ using diffustion_sim
 			))
 
 		#	Validate coefficients only (not time grid)
-			coef_keys = [:b_cxn_peer, :b_cxn_global, :b_self]
+			coef_keys    = [:b_cxn_peer, :b_cxn_global, :b_self]
 			levels_sas   = sort(unique(eachrow(med_time_sas[:, coef_keys])))
 			levels_julia = sort(unique(eachrow(med_time_julia[:, coef_keys])))
 			@assert levels_sas == levels_julia "Coefficient sets differ."
+
+		#	Per-time counts contributing to medians (SAS & Julia)
+			cnt_sas = combine(groupby(df_sas, [:time, :b_cxn_peer, :b_cxn_global, :b_self]),
+				nrow => :n_sas)
+			cnt_jul = combine(groupby(df_julia, [:time, :b_cxn_peer, :b_cxn_global, :b_self]),
+				nrow => :n_julia)
 
 		#	Join on (time + coefficients) using intersection of times
 			comp = innerjoin(
@@ -890,6 +879,10 @@ using diffustion_sim
 				on = [:time, :b_cxn_peer, :b_cxn_global, :b_self],
 				makeunique = true
 			)
+
+		#	Attach counts to the comparison rows
+			comp = innerjoin(comp, cnt_sas, on = [:time, :b_cxn_peer, :b_cxn_global, :b_self])
+			comp = innerjoin(comp, cnt_jul, on = [:time, :b_cxn_peer, :b_cxn_global, :b_self])
 
 		#	Constants used in Julia run (held fixed)
 			const_p_symp      = 0.75
@@ -902,15 +895,15 @@ using diffustion_sim
 			propcurrinf_delta = abs.(comp.propcurrinf_med_sas .- comp.propcurrinf_med_julia)
 			proprec_delta     = abs.(comp.proprec_med_sas     .- comp.proprec_med_julia)
 
-		#	Assemble comparison table (pre-allocated constant columns first)
-			nrows       = nrow(comp)
-			beta_v      = fill(inf_r, nrows)
-			p_symp_v    = fill(const_p_symp, nrows)
-			b_int_v     = fill(const_b_int, nrows)
-			b_close_v   = fill(const_b_close, nrows)
-			b_cls_v     = fill(const_b_cls_x_smp, nrows)
-			rec_t_v     = fill(rec_t, nrows)
-			maxtime_v   = fill(maxtime, nrows)
+		#	Assemble comparison table (constants → coefficients → SAS/Julia medians → deltas → counts)
+			nrows     = nrow(comp)
+			beta_v    = fill(inf_r, nrows)
+			p_symp_v  = fill(const_p_symp, nrows)
+			b_int_v   = fill(const_b_int, nrows)
+			b_close_v = fill(const_b_close, nrows)
+			b_cls_v   = fill(const_b_cls_x_smp, nrows)
+			rec_t_v   = fill(rec_t, nrows)
+			maxtime_v = fill(maxtime, nrows)
 
 			comp_table = DataFrame(
 				beta        = beta_v,
@@ -936,47 +929,46 @@ using diffustion_sim
 
 				propeverinf_delta = propeverinf_delta,
 				propcurrinf_delta = propcurrinf_delta,
-				proprec_delta     = proprec_delta
+				proprec_delta     = proprec_delta,
+
+				n_sas   = comp.n_sas,
+				n_julia = comp.n_julia
 			)
 
-		#	Plot in R: rows = Global effect, cols = Peer effect, color = Symptomatic
+		#	Prep labels for plotting (no counts displayed in plot; counts live in table)
 			@rput comp_table display
 			ycol_j = outcome === :propeverinf ? "propeverinf_med_julia" :
-			         outcome === :propcurrinf ? "propcurrinf_med_julia" :
-			                                   "proprec_med_julia"
+					outcome === :propcurrinf ? "propcurrinf_med_julia" :
+											"proprec_med_julia"
 			ycol_s = outcome === :propeverinf ? "propeverinf_med_sas" :
-			         outcome === :propcurrinf ? "propcurrinf_med_sas" :
-			                                   "proprec_med_sas"
+					outcome === :propcurrinf ? "propcurrinf_med_sas" :
+											"proprec_med_sas"
 			y_label = outcome === :propeverinf ? "Proportion Ever Infected" :
-			          outcome === :propcurrinf ? "Proportion Currently Infected" :
-			                                    "Proportion Recovered"
+					outcome === :propcurrinf ? "Proportion Currently Infected" :
+												"Proportion Recovered"
 
 			title_label    = "SAS vs Julia Median Trajectories"
 			subtitle_label = "Columns: Peer effect   Rows: Global effect   Lines: Symptomatic"
 			param_text = "β=$(round(inf_r, digits=4))  p_symp=$(const_p_symp)  b_int=$(const_b_int)  " *
-			             "b_close=$(const_b_close)  b_cls_x_smp=$(const_b_cls_x_smp)  rec_t=$(rec_t)  maxtime=$(maxtime)"
+						"b_close=$(const_b_close)  b_cls_x_smp=$(const_b_cls_x_smp)  rec_t=$(rec_t)  maxtime=$(maxtime)"
 
 			@rput comp_table ycol_j ycol_s y_label title_label subtitle_label param_text save_path
 
-		#	Open graphics device if saving
+		#	Open graphics device if saving / showing
 			if save_path !== nothing
 				R"""
-				pdf($save_path, width=10, height=12)
+				pdf(save_path, width=10, height=12)
 				"""
 			elseif show_plot
 				R"""
-				#	Set DISPLAY
-					Sys.setenv(DISPLAY=':100')
-					Sys.getenv("DISPLAY")      
-					
-				#	Creating X11 Window
-					X11(type = "cairo", width=10, height=12)
+				Sys.setenv(DISPLAY=':100')
+				Sys.getenv("DISPLAY")
+				X11(type = "cairo", width=10, height=12)
 				"""
 			end
 
-		#	Plotting
+		#	R plotting (solid = Julia, dashed = SAS)
 			R"""
-			# ---- Julia->R injected args as local vars ----
 			col_j <- ycol_j
 			col_s <- ycol_s
 			ylab  <- y_label
@@ -985,83 +977,70 @@ using diffustion_sim
 			param <- param_text
 			spath <- save_path
 
-			# ---- Data prep ----
 			df <- comp_table
 			df[["b_cxn_peer"]]   <- as.numeric(df[["b_cxn_peer"]])
 			df[["b_cxn_global"]] <- as.numeric(df[["b_cxn_global"]])
 			df[["b_self"]]       <- as.numeric(df[["b_self"]])
 			df[["time"]]         <- as.numeric(df[["time"]])
 
-			#  Facet levels
 			peer_levels <- sort(unique(df[["b_cxn_peer"]]))
 			glob_levels <- sort(unique(df[["b_cxn_global"]]))
 			self_levels <- sort(unique(df[["b_self"]]))
 
-			#  Layout: rows = Global effect, cols = Peer effect
 			layout(matrix(1:(length(glob_levels)*length(peer_levels)),
 						nrow=length(glob_levels), byrow=TRUE))
 			par(family="serif", mar=c(3.5,4,2.5,1.5), las=1)
 
-			#  Ticks helper (Dataplot-style)
 			dataplot_tick_function <- function(major_tick_length=0.035, minor_tick_ratio=0.25){
-			packages <- c('Hmisc')
-			missing <- setdiff(packages, rownames(installed.packages()))
-			if (length(missing) > 0) install.packages(missing, repos = "https://cloud.r-project.org")
-			Hmisc::minor.tick(nx = 2, ny = 2, tick.ratio = minor_tick_ratio)
-			Hmisc::minor.tick(nx = 2, ny = 2, tick.ratio = -minor_tick_ratio)
-			axis(2, tck=1, tck=-major_tick_length, labels = FALSE)
-			axis(1, tck=1, tck=-major_tick_length, labels = FALSE)
+				packages <- c('Hmisc')
+				missing <- setdiff(packages, rownames(installed.packages()))
+				if (length(missing) > 0) install.packages(missing, repos = "https://cloud.r-project.org")
+				Hmisc::minor.tick(nx = 2, ny = 2, tick.ratio = minor_tick_ratio)
+				Hmisc::minor.tick(nx = 2, ny = 2, tick.ratio = -minor_tick_ratio)
+				axis(2, tck=1, tck=-major_tick_length, labels = FALSE)
+				axis(1, tck=1, tck=-major_tick_length, labels = FALSE)
 			}
 
-			#  Color palette for Symptomatic lines
 			pal_base <- c("#66CCEE", "#228833", "#CCBB44", "#EE6677", "#AA3377", "#4477AA", "#BBBBBB")
 			if (length(self_levels) <= length(pal_base)) {
-			pal <- pal_base[seq_along(self_levels)]
+				pal <- pal_base[seq_along(self_levels)]
 			} else {
-			pal <- grDevices::colorRampPalette(pal_base)(length(self_levels))
+				pal <- grDevices::colorRampPalette(pal_base)(length(self_levels))
 			}
 
-			#  Panels
 			for (gi in seq_along(glob_levels)) {
-			gval <- glob_levels[gi]
-			for (pi in seq_along(peer_levels)) {
-				#  Slice panel data
-				pval <- peer_levels[pi]
-				sub  <- df[df[["b_cxn_global"]] == gval & df[["b_cxn_peer"]] == pval, ]
+				gval <- glob_levels[gi]
+				for (pi in seq_along(peer_levels)) {
+					pval <- peer_levels[pi]
+					sub  <- df[df[["b_cxn_global"]] == gval & df[["b_cxn_peer"]] == pval, ]
 
-				ylim <- range(c(sub[[ col_j ]], sub[[ col_s ]]), na.rm=TRUE)
-				ylim[1] <- min(0, ylim[1])
+					ylim <- range(c(sub[[ col_j ]], sub[[ col_s ]]), na.rm=TRUE)
+					ylim[1] <- min(0, ylim[1])
 
-				#  Base plot
-				plot(NA, type="n",
-					xlim=range(sub[["time"]], na.rm=TRUE), ylim=ylim,
-					xlab=" ", ylab=ylab, tck=0.015, xaxt='n', bty='L', las=1,
-					main=paste0("Peer effect = ", sprintf("%.2f", pval),
-								"   |   Global effect = ", sprintf("%.2f", gval)))
-				mtext(side = 1, text = 'Time', col = "black", line = 2.45, cex = 0.75, family='serif')
-				axis(1, padj=0.75, tck=0.015)
-				dataplot_tick_function()
+					plot(NA, type="n",
+						xlim=range(sub[["time"]], na.rm=TRUE), ylim=ylim,
+						xlab=" ", ylab=ylab, tck=0.015, xaxt='n', bty='L', las=1,
+						main=paste0("Peer effect = ", sprintf("%.2f", pval),
+									"   |   Global effect = ", sprintf("%.2f", gval)))
+					mtext(side = 1, text = 'Time', col = "black", line = 2.45, cex = 0.75, family='serif')
+					axis(1, padj=0.75, tck=0.015)
+					dataplot_tick_function()
 
-				#  Lines by symptomatic (self) level
-				for (si in seq_along(self_levels)) {
-				sval <- self_levels[si]
-				ss <- sub[sub[["b_self"]] == sval, ]
-				ss <- ss[order(ss[["time"]]), ]
+					for (si in seq_along(self_levels)) {
+						sval <- self_levels[si]
+						ss <- sub[sub[["b_self"]] == sval, ]
+						ss <- ss[order(ss[["time"]]), ]
 
-				#  Julia (solid)
-				lines(ss[["time"]], ss[[ col_j ]], col=pal[si], lwd=2, lty=1)
-
-				#  SAS (dashed)
-				lines(ss[["time"]], ss[[ col_s ]], col=pal[si], lwd=2, lty=2)
+						lines(ss[["time"]], ss[[ col_j ]], col=pal[si], lwd=2, lty=1)
+						lines(ss[["time"]], ss[[ col_s ]], col=pal[si], lwd=2, lty=2)
+					}
 				}
 			}
-			}
 
-			#  Saving
 			if (!is.null(spath)) dev.off()
 			"""
 
-		#	Assembling Result
+		#	Return comparison table (now includes n_sas, n_julia)
 			return comp_table
 	end
 	@doc raw"""
@@ -1482,6 +1461,272 @@ using diffustion_sim
 ########################
 #   DIAGNOSTIC TESTS   #
 ########################
+
+#	Rare Events Analysis
+	function rare_event_diagnostic(
+			comp::DataFrame;
+			outcome::Symbol = :propeverinf,		# :propeverinf | :propcurrinf | :proprec
+			count_metric::Symbol = :n_sas,		# :n_sas | :n_julia | :n_min | :n_hmean
+			bins::Int = 5)
+		#	Pick the delta column implied by `outcome`
+			delta_col = Symbol(string(outcome), "_delta")
+			@assert hasproperty(comp, delta_col) "Column $(delta_col) not found in comp table."
+
+		#	Ensure count columns are present
+			@assert hasproperty(comp, :n_sas)   "comp missing :n_sas"
+			@assert hasproperty(comp, :n_julia) "comp missing :n_julia"
+
+		#	Select the count vector per requested metric
+			ns = comp.n_sas
+			nj = comp.n_julia
+
+			counts = if count_metric === :n_sas
+				ns
+			elseif count_metric === :n_julia
+				nj
+			elseif count_metric === :n_min
+				min.(ns, nj)
+			elseif count_metric === :n_hmean
+				den = ns .+ nj
+				h   = similar(den, Float64)
+				@inbounds for i in eachindex(den)
+					h[i] = (den[i] == 0) ? 0.0 : (2.0 * ns[i] * nj[i]) / den[i]
+				end
+				h
+			else
+				throw(ArgumentError("Unsupported count_metric=$(count_metric)"))
+			end
+
+		#	Filter to valid rows (finite numbers, nonnegative counts)
+			delta = comp[!, delta_col]
+			ok = trues(length(delta))
+			@inbounds for i in eachindex(ok)
+				ok[i] &= isfinite(delta[i]) & isfinite(counts[i]) & (counts[i] ≥ 0)
+			end
+			if !any(ok)
+				return (note = "No valid rows to test.", spearman = nothing, by_bin = DataFrame())
+			end
+
+		#	Slice, convert to Float64
+			d = Float64.(delta[ok])
+			c = Float64.(counts[ok])
+
+		#	Spearman correlations (StatsBase.corspearman)
+			ρ_count = StatsBase.corspearman(d, c)
+
+			invc = similar(c)
+			@inbounds for i in eachindex(invc)
+				invc[i] = 1.0 / max(c[i], 1.0)		# treat 0 as 1 to avoid Inf
+			end
+			ρ_inv = StatsBase.corspearman(d, invc)
+
+		#	Scarcity bins (equal-frequency “ntiles” by counts)
+			n   = length(c)
+			idx = sortperm(c, lt = <)
+			tile = zeros(Int, n)
+			@inbounds for b in 1:bins
+				i_lo = floor(Int, (b - 1) * n / bins) + 1
+				i_hi = floor(Int, b * n / bins)
+				for j in i_lo:i_hi
+					tile[idx[j]] = b
+				end
+			end
+
+			tdf = DataFrame(bin = tile, counts = c, delta = d)
+			by_bin = combine(groupby(tdf, :bin),
+				:counts => minimum  => :count_min,
+				:counts => median   => :count_med,
+				:counts => maximum  => :count_max,
+				:delta  => length   => :n_rows,
+				:delta  => median   => :delta_median,
+				:delta  => mean     => :delta_mean,
+				:delta  => (x -> quantile(x, 0.90)) => :delta_p90,
+				:delta  => maximum  => :delta_max,
+			)
+			sort!(by_bin, :bin)
+
+		#	Return concise summary
+			return (
+				outcome      = outcome,
+				count_metric = count_metric,
+				rows_used    = sum(by_bin.n_rows),
+				spearman     = (
+					rho_delta_vs_count     = ρ_count,	# expect negative if “more data ⇒ smaller delta”
+					rho_delta_vs_inv_count = ρ_inv		# expect positive if “rarer ⇒ bigger delta”
+				),
+				by_bin = by_bin
+			)
+	end
+	
+	diag = rare_event_diagnostic(comp_table; outcome=:propeverinf, count_metric=:n_sas, bins=5)
+	println(diag.spearman)
+	first(diag.by_bin, 5)
+
+#	Within-panel rarity diagnostics (Spearman)
+	function rarity_within_panel_diagnostics(
+		comp_table::DataFrame;
+		outcome::Symbol = :propeverinf,
+		count_strategy::Symbol = :min,
+		return_overall::Bool = true)
+		
+		#	Validate input
+			required_cols = [:b_cxn_peer, :b_cxn_global, :n_sas, :n_julia]
+			missing_cols = setdiff(required_cols, Symbol.(names(comp_table)))
+			if !isempty(missing_cols)
+				error("Missing required columns: $(missing_cols)")
+			end
+
+		#	Select delta column based on outcome
+			delta_col = Symbol("$(outcome)_delta")
+			if !(String(delta_col) in names(comp_table))
+				error("Delta column $(delta_col) not found")
+			end
+
+		#	Extract data
+			delta_all = Float64.(comp_table[!, delta_col])
+			n_sas = Int.(comp_table.n_sas)
+			n_julia = Int.(comp_table.n_julia)
+
+		#	Select count series
+			count_series = if count_strategy === :min
+				min.(n_sas, n_julia)
+			elseif count_strategy === :sas
+				n_sas
+			elseif count_strategy === :julia
+				n_julia
+			else
+				error("Invalid count_strategy: $(count_strategy)")
+			end
+
+		#	Filter valid rows
+			valid_mask = .!ismissing.(delta_all) .& .!ismissing.(count_series)
+			delta_use = delta_all[valid_mask]
+			count_use = Float64.(count_series[valid_mask])
+
+		#	Overall correlation
+			overall = if return_overall && length(delta_use) >= 2
+				(
+					rho_delta_vs_count = corspearman(delta_use, count_use),
+					rho_delta_vs_invcount = corspearman(delta_use, 1.0 ./ max.(count_use, 1.0)),
+					n = length(delta_use)
+				)
+			else
+				(rho_delta_vs_count = NaN, rho_delta_vs_invcount = NaN, n = length(delta_use))
+			end
+
+		#	Per-panel analysis
+			grouped = groupby(comp_table, [:b_cxn_peer, :b_cxn_global])
+			per_panel = combine(grouped) do gi
+				#	Extract panel data
+					gi_delta = Float64.(gi[!, delta_col])
+					gi_ns = Int.(gi.n_sas)
+					gi_nj = Int.(gi.n_julia)
+					
+				#	Panel counts
+					gi_count = if count_strategy === :min
+						min.(gi_ns, gi_nj)
+					elseif count_strategy === :sas
+						gi_ns
+					else
+						gi_nj
+					end
+
+				#	Valid data
+					valid = .!ismissing.(gi_delta) .& .!ismissing.(gi_count)
+					if !any(valid)
+						return DataFrame(
+							rho_delta_vs_count = NaN,
+							rho_delta_vs_invcount = NaN,
+							n = 0
+						)
+					end
+
+					dp = gi_delta[valid]
+					cp = Float64.(gi_count[valid])
+
+				#	Calculate correlations
+					if length(dp) >= 2 && length(unique(dp)) >= 2 && length(unique(cp)) >= 2
+						DataFrame(
+							rho_delta_vs_count = corspearman(dp, cp),
+							rho_delta_vs_invcount = corspearman(dp, 1.0 ./ max.(cp, 1.0)),
+							n = sum(valid)
+						)
+					else
+						DataFrame(
+							rho_delta_vs_count = NaN,
+							rho_delta_vs_invcount = NaN,
+							n = sum(valid)
+						)
+					end
+			end
+
+		#	Return results
+			return (overall = overall, per_panel = per_panel)
+	end
+
+#	Summarize the rarity effect patterns
+	function summarize_rarity_effects(per_panel::DataFrame)
+		#	Add effect strength categories
+			per_panel.peer_strength = abs.(per_panel.b_cxn_peer)
+			per_panel.global_strength = abs.(per_panel.b_cxn_global)
+			per_panel.combined_strength = per_panel.peer_strength .+ per_panel.global_strength
+			
+		#	Key findings
+			println("RARITY EFFECT SUMMARY")
+			println("=" ^ 60)
+			
+		#	Overall pattern
+			mean_rho = mean(per_panel.rho_delta_vs_invcount)
+			println("Overall mean ρ(delta, 1/count): ", round(mean_rho, digits=3))
+			println("  → Positive correlation confirms: Lower counts → Larger errors\n")
+			
+		#	Most affected panels
+			println("Most Affected Panels (strongest rarity effect):")
+			sorted = sort(per_panel, :rho_delta_vs_invcount, rev=true)
+			for i in 1:3
+				row = sorted[i, :]
+				println("  $(i). Peer=$(row.b_cxn_peer), Global=$(row.b_cxn_global)")
+				println("     ρ = $(round(row.rho_delta_vs_invcount, digits=3))")
+			end
+			
+		#	Least affected panels  
+			println("\nLeast Affected Panels:")
+			for i in 1:3
+				row = sorted[end-i+1, :]
+				println("  $(i). Peer=$(row.b_cxn_peer), Global=$(row.b_cxn_global)")
+				println("     ρ = $(round(row.rho_delta_vs_invcount, digits=3))")
+			end
+			
+		#	Pattern analysis
+			println("\nPattern Analysis:")
+		
+		#	By peer effect
+			peer_groups = combine(groupby(per_panel, :b_cxn_peer), 
+				:rho_delta_vs_invcount => mean => :mean_rho)
+			sort!(peer_groups, :b_cxn_peer)
+			println("  By Peer Effect:")
+			for row in eachrow(peer_groups)
+				println("    Peer=$(row.b_cxn_peer): mean ρ = $(round(row.mean_rho, digits=3))")
+			end
+			
+		#	Correlation with effect strengths
+			println("\nEffect Strength Correlations:")
+			println("  ρ(rarity effect, |peer effect|): ", 
+				round(cor(per_panel.rho_delta_vs_invcount, per_panel.peer_strength), digits=3))
+			println("  ρ(rarity effect, |global effect|): ", 
+				round(cor(per_panel.rho_delta_vs_invcount, per_panel.global_strength), digits=3))
+			println("  ρ(rarity effect, combined |effects|): ", 
+				round(cor(per_panel.rho_delta_vs_invcount, per_panel.combined_strength), digits=3))
+			
+			return per_panel
+	end
+
+# 	comp_table is what sas_simulation_comparer returns
+	res = rarity_within_panel_diagnostics(comp_table; outcome=:propeverinf, count_strategy=:min)
+	res.overall
+
+	enhanced_panel = summarize_rarity_effects(res.per_panel)
+
 
 #	Trace Analysis
 
