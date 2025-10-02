@@ -1,0 +1,10 @@
+# PackageCompiler app output
+julia_env/build/
+julia_env/build_app/
+**/sys.so
+**/*.dylib
+**/*.dll
+**/*.so
+**/*.a
+**/*.ji
+**/*.jll
