@@ -3,7 +3,6 @@
 #27 August 2025
 
 #	To Do:
-#	Move Small Speed Test Loop into a Wrapper that R interfaces with
 #	Conduct Julia/R Test of Wrapper
 #	Move Julia Package into an executable
 #	Create R Package that Call Julia Executable
@@ -28,7 +27,7 @@ using Random
 using RCall
 using StatsBase
 using Statistics
-using diffustion_sim
+using diffusion_sim
 
 ######################
 #   TEST FUNCTIONS   #
@@ -462,7 +461,7 @@ using diffustion_sim
 		Notes:
 			- Builds a coefficient **design matrix**, then loops rows → iterations.
 			- Records: `b_cxn_peer`, `b_cxn_global`, `b_self` (varied), plus constants
-			  (`b_int`, `b_close`, `b_cls_x_smp`, `p_symp`) and run ids (`coef_row`, `itter`, `seednode`).
+			(`b_int`, `b_close`, `b_cls_x_smp`, `p_symp`) and run ids (`coef_row`, `itter`, `seednode`).
 			- Preallocates to `96 * num_iter * (maxtime+1)` rows (upper bound), then trims.
 			- Progress bar ticks once per (design row × iteration).
 		"""
@@ -477,19 +476,19 @@ using diffustion_sim
 
 		#	Held-constant parameters (SAS defaults)
 			params = Dict{Symbol,Any}(
-				:b_int        => -0.1,
-				:b_close      =>  1.0,
+				:b_int             => -0.1,
+				:b_close           =>  1.0,
 				:b_cxn_peers_root  => -0.5,
 				:b_cxn_global_root => -3.5,
 				:b_cxn_symp_root   => -1.5,
 				:b_cls_x_smp       => -0.1,
 				:p_symp            =>  0.75,
-				:progress_desc     => "SAS IML-style simulation (design-driven)"
+				:progress_desc     => "SAS IML-style simulation (design-driven)",
 			)
 
 		#	Build coefficient design (4×4×6 = 96 rows)
 			b_peer_v, b_glob_v, b_self_v = replicate_sas_simulation_build_design(
-				params[:b_cxn_peers_root], params[:b_cxn_global_root], params[:b_cxn_symp_root]
+				params[:b_cxn_peers_root], params[:b_cxn_global_root], params[:b_cxn_symp_root],
 			)
 			total_rows = length(b_peer_v)  # 96
 
@@ -504,7 +503,7 @@ using diffustion_sim
 			itter_v        = Vector{Int}(undef, max_out)
 			seednode_v     = Vector{Int}(undef, max_out)
 
-		# 	coefficients (varied) + constants (for traceability)
+		#	coefficients (varied) + constants (for traceability)
 			b_cxn_peer_v   = Vector{Float64}(undef, max_out)
 			b_cxn_global_v = Vector{Float64}(undef, max_out)
 			b_self_v_out   = Vector{Float64}(undef, max_out)
@@ -514,7 +513,7 @@ using diffustion_sim
 			p_symp_v       = Vector{Float64}(undef, max_out)
 			beta_v         = Vector{Float64}(undef, max_out)
 
-		# 	outcomes (per time step)
+		#	outcomes (per time step)
 			time_v         = Vector{Float64}(undef, max_out)
 			propeverinf_v  = Vector{Float64}(undef, max_out)
 			propcurrinf_v  = Vector{Float64}(undef, max_out)
@@ -531,11 +530,11 @@ using diffustion_sim
 				b_self  = b_self_v[i]
 
 				for it in 1:num_iter
-					# 	Random single seed (match SAS sampling of one node)
+					#	Random single seed (match SAS sampling of one node)
 						seednode = rand(1:n_nodes)
 						infectedp = [seednode]
 
-					# 	Run sirdif with this row's coefficients
+					#	Run sirdif with this row's coefficients
 						result = sirdif(
 							alst, vlst, infectedp,
 							inf_r, rec_t, maxtime,
@@ -543,12 +542,12 @@ using diffustion_sim
 							params[:b_int], params[:b_close],
 							b_peers, b_glob, b_self, params[:b_cls_x_smp];
 							transmission_method = :weighted,
-							immunity_duration   = nothing
+							immunity_duration   = nothing,
 						)
 
-					# 	Copy trajectory rows
-						logmat = result["infection_log"]::Matrix{Float64}
-						T      = size(logmat, 1)
+					#	Copy trajectory rows (now a DataFrame)
+						logdf = result["infection_log"]::DataFrame
+						T     = nrow(logdf)
 
 						@inbounds for k in 1:T
 							w += 1
@@ -565,10 +564,10 @@ using diffustion_sim
 							p_symp_v[w]       = params[:p_symp]
 							beta_v[w]         = inf_r
 
-							time_v[w]         = logmat[k, 1]
-							propeverinf_v[w]  = logmat[k, 3]
-							propcurrinf_v[w]  = logmat[k, 4]
-							proprec_v[w]      = logmat[k, 6]
+							time_v[w]         = logdf.time[k]
+							propeverinf_v[w]  = logdf.prop_ever_infected[k]
+							propcurrinf_v[w]  = logdf.prop_currently_infected[k]
+							proprec_v[w]      = logdf.prop_recovered[k]
 						end
 
 					ProgressMeter.next!(p)
@@ -594,9 +593,9 @@ using diffustion_sim
 				time         = time_v[1:last],
 				propeverinf  = propeverinf_v[1:last],
 				propcurrinf  = propcurrinf_v[1:last],
-				proprec      = proprec_v[1:last]
+				proprec      = proprec_v[1:last],
 			)
-	end	
+	end
 	@doc raw"""
 	**Description**
 	Replicates the SAS PROC IML simulation on a fixed input network by (1) building a
@@ -830,11 +829,31 @@ using diffustion_sim
 		alst, vlst,
 		inf_r::Float64, rec_t::Int, maxtime::Int, num_iter::Int,
 		sas_csv_path::AbstractString;
-		outcome::Symbol = :propeverinf,                # :propeverinf | :propcurrinf | :proprec
+		outcome::Symbol = :propeverinf,
 		display::String = ":100",
 		save_path::Union{String,Nothing} = nothing,
 		show_plot::Bool = true,
 		seed::Union{Int,Nothing} = nothing)
+		"""
+		Args:
+			alst, vlst: Network adjacency and weights
+			inf_r: Base transmission probability
+			rec_t: Recovery time in days
+			maxtime: Maximum simulation days
+			num_iter: Iterations per coefficient setting
+			sas_csv_path: Path to SAS CSV output
+		Keywords:
+			outcome: :propeverinf | :propcurrinf | :proprec for plotting
+			display: X11 display target
+			save_path: PDF output path (nothing for X11)
+			show_plot: Whether to open X11 window
+			seed: RNG seed for reproducibility
+		Returns:
+			DataFrame with comparison table
+		Notes:
+			Changed to handle DataFrame infection_log from sirdif
+		"""
+		
 		#	Seed (optional)
 			if seed !== nothing
 				Random.seed!(seed)
@@ -847,12 +866,12 @@ using diffustion_sim
 			num_iter_sas  = length(unique(df_sas.itter))
 			maxtime_sas   = maximum(df_sas.time)
 
-		#	Run Julia simulation (shows its own progress bar)
+		#	Run Julia simulation (now returns DataFrame)
 			df_julia = replicate_sas_simulation(alst, vlst, inf_r, rec_t, Int(maxtime_sas), num_iter_sas)
 
 		#	Aggregate Julia medians/finals
 			julia_summ     = simulation_comparer_build_julia_medians(df_julia)
-			med_time_julia = julia_summ.med_time  # :time, b_* + *_med_julia
+			med_time_julia = julia_summ.med_time
 
 		#	Harmonize SAS median column names → *_med_sas
 			rename!(med_time_sas, Dict(
@@ -895,7 +914,7 @@ using diffustion_sim
 			propcurrinf_delta = abs.(comp.propcurrinf_med_sas .- comp.propcurrinf_med_julia)
 			proprec_delta     = abs.(comp.proprec_med_sas     .- comp.proprec_med_julia)
 
-		#	Assemble comparison table (constants → coefficients → SAS/Julia medians → deltas → counts)
+		#	Assemble comparison table
 			nrows     = nrow(comp)
 			beta_v    = fill(inf_r, nrows)
 			p_symp_v  = fill(const_p_symp, nrows)
@@ -935,7 +954,7 @@ using diffustion_sim
 				n_julia = comp.n_julia
 			)
 
-		#	Prep labels for plotting (no counts displayed in plot; counts live in table)
+		#	Prep labels for plotting
 			@rput comp_table display
 			ycol_j = outcome === :propeverinf ? "propeverinf_med_julia" :
 					outcome === :propcurrinf ? "propcurrinf_med_julia" :
@@ -1040,7 +1059,7 @@ using diffustion_sim
 			if (!is.null(spath)) dev.off()
 			"""
 
-		#	Return comparison table (now includes n_sas, n_julia)
+		#	Return comparison table
 			return comp_table
 	end
 	@doc raw"""
@@ -1203,7 +1222,6 @@ using diffustion_sim
             prop_ever_at_peak = log[peak_idx, 3]
             println("Prop. ever infected by peak day: ", round(prop_ever_at_peak, digits=3))
 	end
-
     
     let log = sir_results["results"]["infection_log"]; ni = log[:,2]
         println("NI (first 30 days): ", join(round.(ni[1:min(end,30)]), ", "))
@@ -1726,7 +1744,6 @@ using diffustion_sim
 	res.overall
 
 	enhanced_panel = summarize_rarity_effects(res.per_panel)
-
 
 #	Trace Analysis
 
@@ -2314,3 +2331,93 @@ using diffustion_sim
 
 	println("\nInfection Order Check:")
 	println(check_infection_order(df))
+
+####################
+#   PACKAGE TESTS  #
+####################
+
+#	Test 1: Help (single & sweep)
+	diffusion_sim.CLI.cli_main(["single", "--help"])
+	diffusion_sim.CLI.cli_main(["sweep",  "--help"])
+
+#	Test 2: Single run end-to-end
+	single_out = "/workspace/data/sim_test_data/result_single.json"
+
+	single_args = [
+		"single",
+		"--graphml", "/workspace/data/sim_test_data/WeakCore1_3.2_2.graphml",
+		# "--sas-transformation",            # uncomment if you want SAS preprocessing
+		"--infected", "1", "3", "9",
+		"--inf-r", "0.02",
+		"--rec-t", "14",
+		"--max-time", "200",
+		"--p-symp", "0.75",
+		"--b-int", "-0.1",
+		"--b-close", "1.0",
+		"--b-cxn-peers", "-0.5",
+		"--b-cxn-total", "-3.5",
+		"--b-cxn-symp", "-1.5",
+		"--b-cls-x-smp", "-0.1",
+		"--transmission", "weighted",
+		"--seed", "12345",
+		"--out", single_out
+	]
+	diffusion_sim.CLI.cli_main(single_args)
+
+	single_csv = replace(single_out, r"\.json$" => "") * "_infection_log.csv"
+	@assert isfile(single_csv) "Single-run CSV not found at $(single_csv)"
+	df_single = CSV.read(single_csv, DataFrame)
+	println("single rows: ", nrow(df_single), "  cols: ", names(df_single))
+	df_single[1:10,:]
+
+# 	Test 3: Sweep run (comma-separated vectors)
+	sweep_out = "/workspace/ergm-based-diffusion-simulations/result_sweep.json"
+
+	sweep_args = [
+		"sweep",
+		"--graphml", "/workspace/data/sim_test_data/WeakCore1_3.2_2.graphml",
+		# "--sas-transformation",
+		"--infected", "1",
+		"--inf-r", "0.02",
+		"--rec-t", "14",
+		"--max-time", "200",
+		"--p-symp", "0.75",
+		"--b-int", "-0.1",
+		"--b-close", "1.0",
+		"--b-cxn-peers", "-0.5,-0.75",
+		"--b-cxn-total", "-3.5,-5.0",
+		"--b-cxn-symp", "-1.5,-2.0",
+		"--b-cls-x-smp", "-0.1",
+		"--num-iter", "2",
+		"--transmission", "weighted",
+		"--seed", "12345",
+		"--out", sweep_out
+	]
+	diffusion_sim.CLI.cli_main(sweep_args)
+
+	sweep_csv = replace(sweep_out, r"\.json$" => "") * "_infection_log.csv"
+	@assert isfile(sweep_csv) "Sweep CSV not found at $(sweep_csv)"
+	df_sweep = CSV.read(sweep_csv, DataFrame)
+	println("sweep rows: ", nrow(df_sweep), "  cols: ", names(df_sweep))
+
+# 	Test 4: Sweep columns & grouping sanity
+	expected = [:time, :n_infected, :prop_ever_infected, :prop_currently_infected, :n_recovered,
+ 				:prop_recovered, :b_cxn_peers, :b_cxn_total,:b_cxn_symp,:iter]
+	present = names(df_single)
+	print(expected)
+	print(present)
+
+# 	Each (bp,bg,bs,iter) should produce a full trajectory
+	by_keys = groupby(df_sweep, [:b_cxn_peers, :b_cxn_total, :b_cxn_symp, :iter])
+	traj_lengths = combine(by_keys, :time => length => :nrows)
+	println("distinct trajectories: ", nrow(traj_lengths))
+	println(first(traj_lengths, 8))
+
+# 	Check each group’s min time == 0
+	g = groupby(df_sweep, [:b_cxn_peers, :b_cxn_total, :b_cxn_symp, :iter])
+	mins = combine(g, :time => minimum => :tmin)
+	@assert all(mins.tmin .== 0.0) "Some trajectories do not start at time==0"
+
+# 	Check that no time exceeds your horizon (e.g., 200)
+	@assert maximum(df_sweep.time) <= 200 "Found time > maxtime"
+

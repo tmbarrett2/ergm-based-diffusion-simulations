@@ -1,4 +1,4 @@
-module diffustion_sim
+module diffusion_sim
 #   Packages
     using CSV
     using DataFrames
@@ -1630,11 +1630,13 @@ module diffustion_sim
 			total_time = time() - start_time
 
 		#	Trim time series
-			inflog = timesum[1:wrow, :]
+			inflog = timesum[1:wrow, 1:6]
+			inflog_df = DataFrame(time = inflog[:, 1], n_infected = inflog[:, 2], prop_ever_infected = inflog[:, 3], 
+								  prop_currently_infected = inflog[:, 4], n_recovered = inflog[:, 5], prop_recovered = inflog[:, 6])
 
 		#	Return results
 			return Dict{String,Any}(
-				"infection_log" => inflog,
+				"infection_log" => inflog_df,
 				"total_time"    => total_time,
 				"final_state"   => state,
 			)
@@ -1681,5 +1683,24 @@ module diffustion_sim
            test_sim_parm_space,
 		   sim_prep,
 		   sirdif
+
+# 	Bring in the CLI submodule
+	include("CLI.jl")   # defines module diffusion_sim.CLI
+
+# 	Executable entrypoint for PackageCompiler:
+"""
+	Executable entrypoint. Returns 0 on success, non-zero on error.
+"""
+	function julia_main()::Cint
+		try
+			# Delegate to CLI with ARGS when the binary starts
+			CLI.cli_main(ARGS)
+			return 0
+		catch err
+			# Print a concise error + backtrace; non-zero exit for shell/R
+			@error "Fatal error" exception=(err, catch_backtrace())
+			return 1
+		end
+	end
 
 end # module diffustion_sim
