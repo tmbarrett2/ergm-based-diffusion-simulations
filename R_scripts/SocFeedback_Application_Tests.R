@@ -6,17 +6,13 @@
     cat("\014")
     rm(list = ls(all.names = TRUE))
 
-#   Set Working Directory
-    setwd("/workspace/data/sim_test_data")
-    getwd()
-
 #   Options
     options(stringsAsFactors = FALSE)
     options(mc.cores = parallel::detectCores())
 
-#	Setting Working Directory to the Test Data Directory
-	setwd("/workspace/data/sim_test_data/")
-	getwd()
+#   Set Working Directory
+    setwd("/workspace/data/sim_test_data")
+    getwd()
 
 #   Pointing to the Simulator Executable
     SIM_BIN <- "/workspace/ergm-based-diffusion-simulations/julia_env/build/diffusion_sim_app/bin/diffusion_sim"
@@ -96,44 +92,56 @@
     }
 
 #   SAS Replication Sweep
-    run_sas_style_sweep <- function(sim_bin, graphml, infected = c(1, 3, 9),
-                                    inf_r = 0.02, rec_t = 14, max_time = 200, p_symp = 0.75,
-                                    b_int = -0.1, b_close = 1.0, b_cls_x_smp = -0.1,
-                                    design = build_sas_design_vectors(), transmission = "weighted",
-                                    seed = 12345, out_json = tempfile(fileext = ".json"), echo_cmd = TRUE){
-
-        #   Checking is Graphml Is Presxent
+    run_sas_style_sweep <- function(sim_bin, graphml, sas_transformation = TRUE, infected = 1, inf_r = 0.02, rec_t = 14,
+                                    max_time = 200, p_symp = 0.75, b_int = -0.1, b_close = 1.0,
+                                    b_cls_x_smp = -0.1, design = build_sas_design_vectors(),
+                                    transmission = "weighted", num_iter = 200, seed = 12345,
+                                    out_json = tempfile(fileext = ".json"), echo_cmd = TRUE) {
+        #   Ensure GraphML exists
             stopifnot(file.exists(graphml))
-
-        #   Comma-separated vectors for sweep
+        
+        #   Helper to collapse vectors for CLI ---
             v2s <- function(x) paste(x, collapse = ",")
-            args <- c(
-                "sweep",
-                "--graphml", graphml,
-                "--infected", as.character(infected),
-                "--inf-r", as.character(inf_r),
-                "--rec-t", as.character(rec_t),
-                "--max-time", as.character(max_time),
-                "--p-symp", as.character(p_symp),
-                "--b-int", as.character(b_int),
-                "--b-close", as.character(b_close),
-                "--b-cxn-peers", v2s(design$peer),
-                "--b-cxn-total", v2s(design$glob),
-                "--b-cxn-symp",  v2s(design$self),
-                "--b-cls-x-smp", as.character(b_cls_x_smp),
-                "--num-iter", "1",                   # SAS loop controls iteration count; adjust here if needed
-                "--transmission", transmission,
-                "--seed", as.character(seed),
-                "--out", out_json
-            )
-            run_cmd(sim_bin, args, echo = echo_cmd)
-            csv_path <- sub("\\.json$", "_infection_log.csv", out_json)
-            assert_file(csv_path, "Sweep infection_log CSV not found.")
-            df <- readr::read_csv(csv_path)
-
-        #   Return Results
-            df
+        
+        #   Build CLI arguments ---
+          args <- c(
+            "sweep",
+            "--graphml", graphml,
+            "--infected", as.character(infected),
+            "--inf-r", as.character(inf_r),
+            "--rec-t", as.character(rec_t),
+            "--max-time", as.character(max_time),
+            "--p-symp", as.character(p_symp),
+            "--b-int", as.character(b_int),
+            "--b-close", as.character(b_close),
+            "--b-cxn-peers", v2s(design$peer),
+            "--b-cxn-total", v2s(design$glob),
+            "--b-cxn-symp", v2s(design$self),
+            "--b-cls-x-smp", as.character(b_cls_x_smp),
+            "--num-iter", as.character(num_iter),
+            "--transmission", transmission,
+            "--seed", as.character(seed),
+            "--out", out_json
+      )
+          
+      #   Add SAS transformation flag if TRUE
+          if (sas_transformation) {
+            args <- c(args, "--sas-transformation")
+          }
+      
+      # --- Run the simulator ---
+      run_cmd(sim_bin, args, echo = echo_cmd)
+      
+      # --- Read output CSV ---
+      csv_path <- sub("\\.json$", "_infection_log.csv", out_json)
+      assert_file(csv_path, "Sweep infection_log CSV not found.")
+      
+      df <- readr::read_csv(csv_path, show_col_types = FALSE)
+      
+      # --- Return stacked DataFrame ---
+      df
     }
+    
 
 #   Simulator Results Aggregation
     julia_medians_from_df <- function(df) {
@@ -349,6 +357,15 @@
 #############
 #   TESTS   #
 #############
+    
+#   Graphml Test
+    pajek_file <- file.path(DATA_DIR, "WeakCore1_3.2_2.net")
+    graphml_file <- file.path(DATA_DIR, "test.graphml")
+    g <- igraph::read_graph(pajek_file, format = "pajek")
+    
+    igraph::write_graph(g, graphml_file, format = "graphml")
+    g_2 <- igraph::read_graph(pajek_file, format = "pajek")
+    summary(g_2)
 
 #   Test 0: Location Test
     cat("==> Using SIM_BIN: ", SIM_BIN, "\n", sep = "")
@@ -499,13 +516,26 @@
 #   Build the SAS design (defaults: -0.5, -3.5, -1.5)
     design <- build_sas_design_vectors()
 
-#   Run a single sweep covering the full 4×4×6 design (num-iter = 1 here;
-    df_cli <- run_sas_style_sweep(sim_bin = SIM_BIN, graphml = GRAPHML,
-                                  infected = c(1, 3, 9), inf_r = 0.02, rec_t = 14, max_time = 200, 
-                                  p_symp = 0.75, b_int = -0.1, b_close = 1.0, b_cls_x_smp = -0.1,
-                                  design = design, transmission = "weighted", seed = 12345,
-                                  out_json = tempfile(fileext = ".json"), echo_cmd = TRUE)
-
+#   Run SAS Replication
+    df_cli <- run_sas_style_sweep(
+      sim_bin   = SIM_BIN,
+      graphml   = GRAPHML,
+      sas_transformation = TRUE,
+      infected  = 1,                # single seed node per iteration
+      inf_r     = 0.02,
+      rec_t     = 14,
+      max_time  = 200,
+      p_symp    = 0.75,
+      b_int     = -0.1,
+      b_close   = 1.0,
+      b_cls_x_smp = -0.1,
+      design    = design,
+      transmission = "weighted",
+      seed      = 12345,
+      out_json  = tempfile(fileext = ".json"),
+      echo_cmd  = TRUE
+    )
+    
 #   Aggregate Julia medians/finals
     jl <- julia_medians_from_df(df_cli)
     med_time_julia <- jl$med_time

@@ -3,7 +3,7 @@
 #   2 October 2025
 
 #   Activate Package
-    cd("/workspace/ergm-based-diffusion-simulations")
+    cd(@__DIR__)  # Use @__DIR__ instead of hardcoded path
     using Pkg
     Pkg.activate(@__DIR__)
     Pkg.status()
@@ -13,6 +13,7 @@
     ENV["JULIA_DEBUG"] = "PackageCompiler"
     ENV["JULIA_PKG_PRECOMPILE_AUTO"] = "0"
 
+#   Loading Compiler
     using PackageCompiler
 
 #   Check the Entry Point
@@ -31,25 +32,35 @@
     create_app(
         PKGDIR,
         APPDIR;
-        executables = ["diffusion_sim" => "julia_main"],  # <-- point to the function
-        precompile_execution_file = PRECOMPILE_EXEC,
-        incremental = false,
-        force = true,
-        filter_stdlibs = false,
-        include_transitive_dependencies = true,
-        include_preferences = true,
-        cpu_target = "generic",
-        sysimage_build_args = `--compile=all`
+        executables=["diffusion_sim" => "julia_main"],
+        precompile_execution_file=PRECOMPILE_EXEC,
+        incremental=false,
+        force=true,
+        filter_stdlibs=false,
+        include_transitive_dependencies=true,
+        include_preferences=true,
+        cpu_target="generic",
+        sysimage_build_args=`--compile=all`
     )
+
+#   Platform-specific executable name
+    exe_name = Sys.iswindows() ? "diffusion_sim.exe" : "diffusion_sim"
+    exe_path = joinpath(APPDIR, "bin", exe_name)
 
 #   Notices
     @info "Done. Run it like:"
-    @info joinpath(APPDIR, "bin", "diffusion_sim") * " --help"
+    @info exe_path * " --help"
 
     println("\n✅ Built app at: ", APPDIR)
-    println("Binary:\n  ", joinpath(APPDIR, "bin", "diffusion_sim"))
+    println("Binary:\n  ", exe_path)
     println("\nTry:")
-    println("  ", joinpath(APPDIR, "bin", "diffusion_sim"), " --help")
+    if Sys.iswindows()
+        println("  .\\", relpath(exe_path), " --help")
+    else
+        println("  ./", relpath(exe_path), " --help")
+    end
 
-# Julia Compilation Command # julia --project -e 'include("build_app.jl")' 
-# ./julia_env/build/diffusion_sim_app/bin/diffusion_sim --help
+# Platform-specific run instructions:
+# Windows:
+#   julia --project -e "include(\"build_app.jl\")"
+#   .\build\diffusion_sim_app\bin\diffusion_sim.exe --help
