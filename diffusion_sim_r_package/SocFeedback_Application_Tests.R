@@ -2,12 +2,6 @@
 #   Jonathan H. Morgan, Ph.D. and Tyler M. Barrett, Ph.D.
 #   3 October 2025
 
-######### NEXT STEPS JANUARY 1, 2026 ###############
-## 1. Review and QA plotting functions and documentation
-## 2. Update multi examples to use 12 nets
-## 3. Figure out best parameter values for example
-## 4. Send everything to Jon with an update
-
 #   Clear Out Console Script
     cat("\014")
     rm(list = ls(all.names = TRUE))
