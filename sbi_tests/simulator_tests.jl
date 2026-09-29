@@ -2,10 +2,11 @@
 #Jonathan H. Morgan, Ph.D.
 #29 September 2026
 
-#   Activating Local Environment
-	using Pkg
-	Pkg.activate(joinpath(@__DIR__, ".."))
-	Pkg.status()
+#   Pulling-In diffustion_sim & Activating Local Environment
+    cd("/workspace/ergm-based-diffusion-simulations")
+    using Pkg
+    Pkg.activate("/workspace/ergm-based-diffusion-simulations/julia_env")
+    Pkg.status()
 
 ################
 #   PACKAGES   #
@@ -650,7 +651,7 @@ using diffusion_sim
 #############
 
 #	Network Paths (EC2 test data)
-	graphml_path = "/workspace/data/sim_test_data/WeakCore1_3.2_2.graphml"
+	graphml_path = "/workspace/ergm_data/sim_test_data/WeakCore1_3.2_2.graphml"
 
 #	Load Networks
 	network_data = sim_prep(graphml_path)
