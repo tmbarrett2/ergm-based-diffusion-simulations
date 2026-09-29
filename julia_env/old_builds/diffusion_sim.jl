@@ -603,167 +603,16 @@ module diffusion_sim
 			return (alst_vec, vlst_vec)
 	end
 
-#	Duration Specification Types for sirdif
-	abstract type DurationSpec end
-
-	struct FixedDuration <: DurationSpec
-		days::Int
-		function FixedDuration(days::Integer)
-			#	Validation
-				if days < 1
-					throw(DomainError(days, "days must be ≥ 1"))
-				end
-			#	Construct
-				return new(Int(days))
-		end
-	end
-
-	struct WeibullDuration <: DurationSpec
-		scale::Float64
-		shape::Float64
-		function WeibullDuration(scale::Real, shape::Real)
-			#	Validation
-				if !(scale > 0.0) || !isfinite(scale)
-					throw(DomainError(scale, "scale must be positive and finite"))
-				end
-				if !(shape > 0.0) || !isfinite(shape)
-					throw(DomainError(shape, "shape must be positive and finite"))
-				end
-			#	Construct
-				return new(Float64(scale), Float64(shape))
-		end
-	end
-	@doc raw"""
-	**Description**
-	Duration specifications for recovery and immunity in `sirdif`. A `FixedDuration` gives every individual the same number of days. A `WeibullDuration` draws a personal duration for each individual.
-
-	**Usage**
-	`FixedDuration(days)`
-	`WeibullDuration(scale, shape)`
-
-	**Arguments**
-	- `days::Integer`: Constant duration in days (≥ 1).
-	- `scale::Real`: Weibull scale λ, the characteristic duration in days (> 0).
-	- `shape::Real`: Weibull shape k (> 0). `k = 1` gives the exponential (memoryless) case.
-
-	**Details**
-	Weibull durations are drawn by inverse transform as ``\lambda E^{1/k}``, where ``E`` is a standard exponential draw, then rounded to the nearest day with a floor of one day. A `FixedDuration` makes no random draws, so a simulation with fixed recovery consumes the random number stream exactly as the validated simulator does.
-
-	**Value**
-	A `DurationSpec` for the `recovery` argument or the `immunity` keyword of `sirdif`.
-
-	**See Also**
-	`sirdif`, `draw_duration`
-	""" DurationSpec
-
-#	Helper Function for sirdif: draw a fixed duration
-	function draw_duration(spec::FixedDuration, rng::AbstractRNG)
-		"""
-		Args:
-			spec::FixedDuration: constant duration in days
-			rng::AbstractRNG: random number generator (unused)
-		Returns:
-			Int: spec.days
-		Notes:
-			Makes no random draws, which keeps the random number stream
-			identical to the validated constant-duration simulator.
-		"""
-
-		#	Return the constant duration
-			return spec.days
-	end
-
-#	Helper Function for sirdif: draw a Weibull duration
-	function draw_duration(spec::WeibullDuration, rng::AbstractRNG)
-		"""
-		Args:
-			spec::WeibullDuration: Weibull scale and shape
-			rng::AbstractRNG: random number generator
-		Returns:
-			Int: duration in whole days, at least 1
-		Notes:
-			Inverse transform: scale * E^(1/shape) with E ~ Exp(1).
-			The floor of one day is required because sirdif recovers an
-			individual only when the countdown reaches exactly zero.
-			Draws are capped at 1e9 days before rounding to avoid
-			integer overflow; any duration beyond the horizon is
-			equivalent.
-		"""
-
-		#	Draw by inverse transform
-			d = spec.scale * randexp(rng)^(1.0 / spec.shape)
-
-		#	Cap, round to whole days, and apply the one-day floor
-			d = min(d, 1.0e9)
-			return max(1, round(Int, d))
-	end
-	@doc raw"""
-	**Description**
-	Draw one duration in whole days from a `DurationSpec`.
-
-	**Usage**
-	`draw_duration(spec, rng)`
-
-	**Arguments**
-	- `spec::DurationSpec`: `FixedDuration` or `WeibullDuration`.
-	- `rng::AbstractRNG`: Random number generator.
-
-	**Details**
-	`FixedDuration` returns its constant without touching `rng`. `WeibullDuration` returns ``\max(1, \mathrm{round}(\lambda E^{1/k}))`` with ``E \sim \mathrm{Exp}(1)``.
-
-	**Value**
-	`Int` number of days, at least 1.
-
-	**Examples**
-	```julia
-	using Random
-	rng = Xoshiro(42)
-	draw_duration(FixedDuration(14), rng)
-	draw_duration(WeibullDuration(10.0, 2.0), rng)
-	```
-	""" draw_duration
-
-#	Helper Function for sirdif: in-place vector filter
-	function remove_id!(v::Vector{Int}, id::Int)
-		"""
-		Args:
-			v::Vector{Int}: vector to filter in place
-			id::Int: value to remove
-		Returns:
-			Nothing
-		Notes:
-			Preserves the order of the remaining elements. Moved from
-			inside sirdif to module scope without change to its logic.
-		"""
-
-		#	Compact the vector, skipping id
-			w = 1
-			@inbounds for i in 1:length(v)
-				x = v[i]
-				if x != id
-					v[w] = x
-					w += 1
-				end
-			end
-
-		#	Trim the tail
-			if w <= length(v)
-				resize!(v, w - 1)
-			end
-			return nothing
-	end
-
 #	SIR Diffusion Simulation with Social Feedback
 	function sirdif(
 		alst::Union{Matrix{Int}, Vector{Vector{Int}}},
 		vlst::Union{Matrix{Float64}, Vector{Vector{Float64}}},
-		infectedp::Vector{Int}, inf_r::Float64, recovery::DurationSpec,
+		infectedp::Vector{Int}, inf_r::Float64, rec_t::Int,
 		maxtime::Int, p_symp::Float64, b_int::Float64,
 		b_close::Float64, b_cxn_peers::Float64, b_cxn_total::Float64,
 		b_cxn_symp::Float64, b_cls_x_smp::Float64;
 		transmission_method::Symbol = :weighted,
-		immunity::Union{DurationSpec,Nothing} = nothing,
-		rng::AbstractRNG = Random.default_rng()
+		immunity_duration::Union{Int,Nothing} = nothing
 	)
 		"""
 		Args:
@@ -771,7 +620,7 @@ module diffusion_sim
 			vlst: Edge weights aligned to alst
 			infectedp: Initial infected node IDs
 			inf_r: Base transmission probability
-			recovery: FixedDuration or WeibullDuration for recovery
+			rec_t: Recovery time in days
 			maxtime: Maximum simulation days
 			p_symp: Probability infected is symptomatic
 			b_int: Baseline interaction coefficient
@@ -781,14 +630,11 @@ module diffusion_sim
 			b_cxn_symp: Symptomatic coefficient
 			b_cls_x_smp: Peers × symptomatic interaction
 			transmission_method: :weighted or :simple (default :weighted)
-			immunity: FixedDuration, WeibullDuration, or nothing for permanent immunity (default nothing)
-			rng: Random number generator for every draw (default Random.default_rng())
+			immunity_duration: Days of immunity after recovery (default nothing)
 		Returns:
 			Dict with infection_log, total_time, final_state
 		Notes:
 			Exact SAS behavior: FIFO ordering, cumulative peer counts, and single-row padding at extinction.
-			With FixedDuration recovery, permanent immunity, and the default rng, the output matches the
-			validated simulator exactly, plus the appended prop_cum_infected column.
 		"""
 
 		#	Cache network size
@@ -833,8 +679,8 @@ module diffusion_sim
 		#	Start wall clock
 			start_time = time()
 
-		#	State matrix: [id, I, S, R, t_rec, nbrsinf, infection_order, t_imm, ever_infected]
-			state = zeros(Int, n_nodes, 9)
+		#	State matrix: [id, I, S, R, t_rec, nbrsinf, infection_order]
+			state = zeros(Int, n_nodes, 7)
 			@inbounds begin
 				state[:, 1] .= unique_ids
 				state[:, 3] .= 1
@@ -848,25 +694,18 @@ module diffusion_sim
 			TIME_TO_RECOVERY_COL = 5
 			NBRSINF_COL          = 6
 			INFECTION_ORDER_COL  = 7
-			TIME_TO_IMMUNITY_LOSS_COL = 8
-			EVER_INFECTED_COL    = 9
 
-		#	Initialize infection order and cumulative incidence counters
+		#	Initialize infection order counter
 			infection_counter = 0
-			n_ever = 0
 
 		#	Seed infections
 			@inbounds for inf_id in infectedp
 				idx = id_to_idx[inf_id]
 				state[idx, INFECTED_COL]         = 1
 				state[idx, SUSCEPTIBLE_COL]      = 0
-				state[idx, TIME_TO_RECOVERY_COL] = draw_duration(recovery, rng)
+				state[idx, TIME_TO_RECOVERY_COL] = rec_t
 				infection_counter += 1
 				state[idx, INFECTION_ORDER_COL]  = infection_counter
-				if state[idx, EVER_INFECTED_COL] == 0
-					state[idx, EVER_INFECTED_COL] = 1
-					n_ever += 1
-				end
 			end
 
 		#	Susceptible adjacency (preserve original column order)
@@ -877,6 +716,22 @@ module diffusion_sim
 				weights     = vlst_vec[i][2:end]
 				s_alst_vec[i] = copy(neighbors)
 				s_vlst_map[i] = Dict(zip(neighbors, weights))
+			end
+
+		#	In-place vector filter helper
+			@inline function remove_id!(v::Vector{Int}, id::Int)
+				w = 1
+				@inbounds for i in 1:length(v)
+					x = v[i]
+					if x != id
+						v[w] = x
+						w += 1
+					end
+				end
+				if w <= length(v)
+					resize!(v, w - 1)
+				end
+				return nothing
 			end
 
 		#	Remove initially infected from all susceptible lists
@@ -898,11 +753,11 @@ module diffusion_sim
 			end
 
 		#	Time series buffer (preallocated; may finish early)
-			timesum = Matrix{Float64}(undef, maxtime + 1, 8)
+			timesum = Matrix{Float64}(undef, maxtime + 1, 7)
 			wrow    = 1
 			n_initial = length(infectedp)
 			pinf      = n_initial / n_nodes
-			timesum[wrow, :] = Float64[0.0, n_initial, pinf, 0.0, 0.0, 0.0, 0.0, n_ever / n_nodes]
+			timesum[wrow, :] = Float64[0.0, n_initial, pinf, 0.0, 0.0, 0.0, 0.0]
 
 		#	Per-day buffers
 			infected_idx_buf   = Vector{Int}(undef, n_nodes)
@@ -934,7 +789,7 @@ module diffusion_sim
 						prop_cur_now  = 0.0
 						prop_rec_now  = NR_now == 0 ? 0.0 : 1.0
 						wrow += 1
-						timesum[wrow, :] = Float64[maxtime, NI_now, prop_ever_now, prop_cur_now, NR_now, prop_rec_now, NR_now, n_ever / n_nodes]
+						timesum[wrow, :] = Float64[maxtime, NI_now, prop_ever_now, prop_cur_now, NR_now, prop_rec_now, NR_now]
 						break
 					end
 
@@ -956,7 +811,7 @@ module diffusion_sim
 							susceptible_neighbor_ids = s_alst_vec[ego_idx]
 
 						#	Ego symptomatic draw (per-day)
-							issympt = (rand(rng) < p_symp) ? 1 : 0
+							issympt = (rand() < p_symp) ? 1 : 0
 
 						#	Scan neighbors
 							for alter_id in susceptible_neighbor_ids
@@ -976,19 +831,15 @@ module diffusion_sim
 									prob_act = exp(lwact) / (1 + exp(lwact))
 
 								#	Activation and transmission
-									if rand(rng) < prob_act
+									if rand() < prob_act
 										transprob = transmission_method === :weighted ? (1 - (1 - inf_r)^edgwgt) : inf_r
-										if rand(rng) < transprob
+										if rand() < transprob
 											#	Update state
 												state[alter_idx, INFECTED_COL]         = 1
 												state[alter_idx, SUSCEPTIBLE_COL]      = 0
-												state[alter_idx, TIME_TO_RECOVERY_COL] = draw_duration(recovery, rng)
+												state[alter_idx, TIME_TO_RECOVERY_COL] = rec_t
 												infection_counter += 1
 												state[alter_idx, INFECTION_ORDER_COL]  = infection_counter
-												if state[alter_idx, EVER_INFECTED_COL] == 0
-													state[alter_idx, EVER_INFECTED_COL] = 1
-													n_ever += 1
-												end
 
 											#	Remove alter from all susceptible lists
 												for k in 1:n_nodes
@@ -1008,30 +859,6 @@ module diffusion_sim
 							state[ego_idx, TIME_TO_RECOVERY_COL] -= 1
 					end
 
-				#	SIRS waning immunity (optional)
-				#	Runs before today's recoveries, so a duration of D days gives D full immune days
-					if immunity !== nothing
-						#	Count down immunity for individuals recovered before today
-							for i in 1:n_nodes
-								if state[i, RECOVERED_COL] == 1 && state[i, TIME_TO_IMMUNITY_LOSS_COL] > 0
-									state[i, TIME_TO_IMMUNITY_LOSS_COL] -= 1
-								end
-							end
-
-						#	Return individuals whose immunity has lapsed to the susceptible state
-							for i in 1:n_nodes
-								if state[i, RECOVERED_COL] == 1 && state[i, TIME_TO_IMMUNITY_LOSS_COL] == 0
-									state[i, RECOVERED_COL]   = 0
-									state[i, SUSCEPTIBLE_COL] = 1
-									for j in 1:n_nodes
-										if i != j && (unique_ids[i] in alst_vec[j][2:end])
-											push!(s_alst_vec[j], unique_ids[i])	# Only in SIRS mode
-										end
-									end
-								end
-							end
-					end
-
 				#	Move recovered
 					for i in 1:n_nodes
 						if state[i, TIME_TO_RECOVERY_COL] == 0 && state[i, INFECTED_COL] == 1
@@ -1039,8 +866,28 @@ module diffusion_sim
 							state[i, RECOVERED_COL]        = 1
 							state[i, TIME_TO_RECOVERY_COL] = 0
 							state[i, INFECTION_ORDER_COL]  = 0
-							if immunity !== nothing
-								state[i, TIME_TO_IMMUNITY_LOSS_COL] = draw_duration(immunity, rng)
+							if immunity_duration !== nothing
+								state[i, TIME_TO_RECOVERY_COL] = -immunity_duration
+							end
+						end
+					end
+
+				#	SIRS waning immunity (optional)
+					if immunity_duration !== nothing
+						for i in 1:n_nodes
+							if state[i, TIME_TO_RECOVERY_COL] < 0 && state[i, RECOVERED_COL] == 1
+								state[i, TIME_TO_RECOVERY_COL] += 1
+							end
+						end
+						for i in 1:n_nodes
+							if state[i, TIME_TO_RECOVERY_COL] == 0 && state[i, RECOVERED_COL] == 1
+								state[i, RECOVERED_COL]   = 0
+								state[i, SUSCEPTIBLE_COL] = 1
+								for j in 1:n_nodes
+									if i != j && (unique_ids[i] in alst_vec[j][2:end])
+										push!(s_alst_vec[j], unique_ids[i])	# Only in SIRS mode
+									end
+								end
 							end
 						end
 					end
@@ -1063,17 +910,16 @@ module diffusion_sim
 					prop_rec  = (NI + NR) > 0 ? NR / (NI + NR) : 0.0
 
 					wrow += 1
-					timesum[wrow, :] = Float64[t, NI, prop_ever, prop_cur, NR, prop_rec, NR, n_ever / n_nodes]
+					timesum[wrow, :] = Float64[t, NI, prop_ever, prop_cur, NR, prop_rec, NR]
 			end
 
 		#	Stop clock
 			total_time = time() - start_time
 
 		#	Trim time series
-			inflog = timesum[1:wrow, :]
+			inflog = timesum[1:wrow, 1:6]
 			inflog_df = DataFrame(time = inflog[:, 1], n_infected = inflog[:, 2], prop_ever_infected = inflog[:, 3], 
-								  prop_currently_infected = inflog[:, 4], n_recovered = inflog[:, 5], prop_recovered = inflog[:, 6],
-								  prop_cum_infected = inflog[:, 8])
+								  prop_currently_infected = inflog[:, 4], n_recovered = inflog[:, 5], prop_recovered = inflog[:, 6])
 
 		#	Return results
 			return Dict{String,Any}(
@@ -1085,26 +931,22 @@ module diffusion_sim
 	@doc raw"""
 	**Description**  
 	Simulates SIR/SIRS diffusion matching SAS exactly with preserved column order
-	for RNG synchronization and cumulative peer effects. Recovery and immunity
-	durations are either constant or drawn per individual from a Weibull distribution.
+	for RNG synchronization and cumulative peer effects.
 
 	**Usage**  
-	`sirdif(alst, vlst, infectedp, inf_r, recovery, maxtime, p_symp, b_int, b_close, b_cxn_peers, b_cxn_total, b_cxn_symp, b_cls_x_smp; transmission_method=:weighted, immunity=nothing, rng=Random.default_rng())`
-
-	`sirdif(alst, vlst, infectedp, inf_r, rec_t::Int, maxtime, p_symp, b_int, b_close, b_cxn_peers, b_cxn_total, b_cxn_symp, b_cls_x_smp; transmission_method=:weighted, immunity_duration=nothing, rng=Random.default_rng())`
+	`sirdif(alst, vlst, infectedp, inf_r, rec_t, maxtime, p_symp, b_int, b_close, b_cxn_peers, b_cxn_total, b_cxn_symp, b_cls_x_smp; transmission_method=:weighted, immunity_duration=nothing)`
 
 	**Arguments**
 	- `alst`: Adjacency list (Matrix or Vector{Vector})
 	- `vlst`: Edge weights aligned to `alst`
 	- `infectedp`: Initial infected node IDs
 	- `inf_r`: Base transmission probability
-	- `recovery::DurationSpec`: `FixedDuration(days)` or `WeibullDuration(scale, shape)`. The second form of the call takes `rec_t::Int` and is equivalent to `FixedDuration(rec_t)`.
+	- `rec_t`: Days to recovery (constant)
 	- `maxtime`: Simulation horizon (days)
 	- `p_symp`: Probability infected is symptomatic
 	- `b_int, b_close, b_cxn_peers, b_cxn_total, b_cxn_symp, b_cls_x_smp`: Logit coefficients
 	- `transmission_method`: `:weighted` or `:simple`
-	- `immunity`: `FixedDuration`, `WeibullDuration`, or `nothing` for permanent immunity (default). The second form of the call takes `immunity_duration::Int` instead.
-	- `rng::AbstractRNG`: Generator for every random draw (default `Random.default_rng()`, the global generator).
+	- `immunity_duration`: Days of immunity after recovery (SIRS mode)
 
 	**Details**
 	- Preserves exact column order from adjacency matrix for RNG alignment
@@ -1112,66 +954,17 @@ module diffusion_sim
 	- Infected processed in FIFO order by infection time
 	- Immediate within-timestep updates when transmission occurs
 	- **SAS-style termination**: when infections drop to zero, a single final row is written at `time=maxtime`.
-	- **Durations**: Weibull draws are rounded to whole days with a floor of one day. `FixedDuration` makes no random draws, so fixed recovery with permanent immunity and the default `rng` reproduces the validated simulator exactly.
-	- **Waning immunity**: an individual who recovers at the end of day r with an immunity duration of D days is immune on days r+1 through r+D and becomes susceptible at the end of day r+D.
-	- **Cumulative incidence**: `prop_cum_infected` is the proportion of individuals infected at least once. It never decreases. Under waning immunity, `prop_ever_infected` = (NI + NR)/N can decline and is not cumulative.
 
 	**Value**
-	Dict with `infection_log` (time series), `total_time`, and `final_state`.
-	- `infection_log` columns: `time`, `n_infected`, `prop_ever_infected`, `prop_currently_infected`, `n_recovered`, `prop_recovered`, `prop_cum_infected`.
-	- `final_state` columns: id, I, S, R, days to recovery, (unused), infection order, days to immunity loss, ever infected.
+	Dict with `infection_log` (time series), `total_time`, and `final_state`
 
 	**See Also**
-	`sim_prep`, `replicate_sas_simulation`, `FixedDuration`, `WeibullDuration`
+	`sim_prep`, `replicate_sas_simulation`
 	""" sirdif
-
-
-#	SIR Diffusion Simulation with Social Feedback: Integer Recovery Time
-	function sirdif(
-		alst::Union{Matrix{Int}, Vector{Vector{Int}}},
-		vlst::Union{Matrix{Float64}, Vector{Vector{Float64}}},
-		infectedp::Vector{Int}, inf_r::Float64, rec_t::Int,
-		maxtime::Int, p_symp::Float64, b_int::Float64,
-		b_close::Float64, b_cxn_peers::Float64, b_cxn_total::Float64,
-		b_cxn_symp::Float64, b_cls_x_smp::Float64;
-		transmission_method::Symbol = :weighted,
-		immunity_duration::Union{Int,Nothing} = nothing,
-		rng::AbstractRNG = Random.default_rng()
-	)
-		"""
-		Args:
-			rec_t: Recovery time in days (constant)
-			immunity_duration: Days of immunity after recovery (default nothing)
-			[other args same as the DurationSpec method]
-		Returns:
-			Dict with infection_log, total_time, final_state
-		Notes:
-			Preserves the original call form used by the CLI, the SAS
-			replication, and the validation tests. Forwards to the
-			DurationSpec method with FixedDuration values.
-		"""
-
-		#	Convert integer durations to duration specifications
-			recovery = FixedDuration(rec_t)
-			immunity = immunity_duration === nothing ? nothing : FixedDuration(immunity_duration)
-
-		#	Forward to the main method
-			return sirdif(
-				alst, vlst, infectedp, inf_r, recovery, maxtime, p_symp,
-				b_int, b_close, b_cxn_peers, b_cxn_total, b_cxn_symp, b_cls_x_smp;
-				transmission_method = transmission_method,
-				immunity = immunity,
-				rng = rng
-			)
-	end
 
 #   Exporting Objects
     export sim_prep,
-		   sirdif,
-		   DurationSpec,
-		   FixedDuration,
-		   WeibullDuration,
-		   draw_duration
+		   sirdif
 
 # 	Bring in the CLI submodule
 	include("CLI.jl")   # defines module diffusion_sim.CLI
