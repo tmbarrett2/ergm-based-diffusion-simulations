@@ -4,7 +4,15 @@
 #Revised 12 October 2026: known initial offset C(0) (Option A), convergence,
 #boundary, and transition checks, fit status codes, peak timing and incidence,
 #and an explicit random number generator for simulate_richards. Target region,
-#analytic peak prevalence, and in_target implemented (UT-1.3).
+#analytic peak prevalence, and in_target implemented (UT-1.3). Non-starter
+#runs (no transmission at all) are classified as non-viable; extinct runs
+#follow an explicit policy in evaluate_target. The curve is parameterized by its
+#inflection time t_i, the day of peak incidence, which stays within the horizon
+#for early-peaking network epidemics. The fit also reports its root-mean-square
+#residual, fit_rmse. The shape parameter a runs from -1 to 10, so the family
+#spans the monomolecular (a = -1), Gompertz (a = 0), and logistic (a = 1) curves;
+#a < 0 gives a curve with a definite start and an early peak. The share of the
+#final size reached at the inflection is reported as frac_at_inflection.
 
 module richards_model
 
@@ -25,8 +33,8 @@ using Random
 			t::Vector{Float64}: time points at which to evaluate the curve
 			K::Float64: final epidemic size beyond the initial offset (0 < K ≤ 1 - C0)
 			r::Float64: per-capita growth rate (r > 0)
-			t_i::Float64: inflection time parameter
-			a::Float64: asymmetry exponent (a > 0; a = 1 recovers logistic)
+			t_i::Float64: inflection time, the day of peak incidence
+			a::Float64: asymmetry exponent (a ≥ -1; -1 monomolecular, 0 Gompertz, 1 logistic)
 			C0::Float64: known initial offset, the seed fraction (default = 0.0)
 			sigma::Union{Float64, Nothing}: standard deviation of additive Gaussian noise (default = nothing, deterministic)
 			seed::Union{Int, Nothing}: seed for a local Xoshiro generator when sigma is set (default = nothing)
@@ -38,7 +46,14 @@ using Random
 				C_true::Vector{Float64}: deterministic curve C0 + Richards (always clean)
 				params::NamedTuple: (K, r, t_i, a, C0) used to generate the curve
 		Notes:
-			C(t) = C0 + K / [1 + exp(-r * (t - t_i))]^(1/a)
+			C(t) = C0 + K [1 + a exp(-r (t - t_i))]^(-1/a)
+			t_i is the inflection of C(t) and the day of peak incidence for
+			every a > -1. Versions before 12 October 2026 took t_i as the
+			location constant of the form K / [1 + exp(-r (t - t_i))]^(1/a),
+			which is the inflection only when a = 1. For a ≠ 1, a curve
+			generated with the same arguments is now shifted by ln(a)/r days.
+			a may be 0 or negative down to -1 (12 October 2026); see
+			richards_value for the forms these take.
 			C0 mirrors the simulator, which starts at seeds/N rather than 0.
 			The seed keyword now builds a local Xoshiro(seed) instead of calling
 			Random.seed!(seed). Xoshiro(s) reproduces Random.seed!(s) exactly
@@ -56,8 +71,8 @@ using Random
 			if r <= 0.0
 				throw(DomainError(r, "r must be positive"))
 			end
-			if a <= 0.0
-				throw(DomainError(a, "a must be positive"))
+			if !(a >= -1.0) || !isfinite(a)
+				throw(DomainError(a, "a must be finite and at least -1"))
 			end
 			if length(t) < 2
 				throw(ArgumentError("t must contain at least 2 time points"))
@@ -99,8 +114,8 @@ using Random
 	- `t::Vector{Float64}`: Time points at which to evaluate the curve.
 	- `K::Float64`: Final epidemic size beyond the offset, as a proportion (0 < K ≤ 1 - C0).
 	- `r::Float64`: Per-capita growth rate (must be positive).
-	- `t_i::Float64`: Inflection time parameter.
-	- `a::Float64`: Asymmetry exponent (must be positive). `a = 1` recovers the standard logistic curve.
+	- `t_i::Float64`: Inflection time, the day of peak incidence.
+	- `a::Float64`: Asymmetry exponent, at least `-1`. `a = 1` is the logistic curve, `a = 0` the Gompertz curve, and `a = -1` the monomolecular curve.
 	- `C0::Float64`: Known initial offset (default `0.0`). In simulator output this is the seed fraction, seeds/N.
 	- `sigma::Union{Float64, Nothing}`: Standard deviation of additive Gaussian noise (default `nothing` for deterministic output).
 	- `seed::Union{Int, Nothing}`: Seed for a local `Xoshiro` generator when noise is applied (default `nothing`).
@@ -109,7 +124,11 @@ using Random
 	**Details**
 	The curve is:
 
-	``C(t) = C_0 + \frac{K}{[1 + \exp(-r \cdot (t - t_i))]^{1/a}}``
+	``C(t) = C_0 + K \left[1 + a\, e^{-r (t - t_i)}\right]^{-1/a}``
+
+	Here ``t_i`` is the inflection of ``C(t)``, which is also the day of peak incidence, for every ``a > -1``. Before 12 October 2026, ``t_i`` was the location constant of the form ``K / [1 + e^{-r(t - t_i)}]^{1/a}``, which is the inflection only when ``a = 1``; for ``a \neq 1``, a curve generated with the same arguments is now shifted by ``\ln(a)/r`` days.
+
+	Values ``-1 \le a \le 0`` are allowed; see `fit_richards` for what they mean.
 
 	When `sigma` is `nothing` or `0.0`, the output is the exact deterministic curve. When `sigma > 0`, independent Gaussian noise ``N(0, \sigma^2)`` is added to each point and the result is clamped to `[0.0, 1.0]` since `C` represents a proportion.
 
@@ -149,25 +168,172 @@ using Random
 #	FITTING
 # ============================================================
 
-#	Helper Function for fit_richards: Richards curve
+#	Helper Function for richards_curve: the curve at one time point
+	function richards_value(t::Real, K::Real, r::Real, ti::Real, a::Real)
+		"""
+		Args:
+			t::Real: time point
+			K, r, ti, a::Real: final size, growth rate, inflection time, and shape
+		Returns:
+			Float64 (or the promoted type): K [1 + a x]^(-1/a) with x = exp(-r (t - t_i))
+		Notes:
+			Three cases (12 October 2026):
+			a ≠ 0: K exp(-log1p(a x)/a). log1p keeps small |a| accurate,
+				so the curve is continuous through a = 0.
+			a = 0: the Gompertz curve K exp(-x), the limit of the
+				general form.
+			a < 0 with a x ≤ -1: 0.0. A negative a gives a curve with a
+				definite start at t_0 = t_i + ln(-a)/r (richards_start);
+				before t_0 no one beyond the seeds is infected. The guard
+				also keeps log1p inside its domain.
+			Overflow of exp() gives x = Inf, and the result is 0.0 in
+			every case, the correct limit.
+		"""
+
+		#	Gompertz case
+			x = exp(-r * (t - ti))
+			if a == 0
+				return K * exp(-x)
+			end
+
+		#	Before the start of a curve with a definite start
+			if a * x <= -1
+				return zero(K * x)
+			end
+
+		#	General case
+			return K * exp(-log1p(a * x) / a)
+	end
+
+#	Richards Curve
 	function richards_curve(t, p)
 		"""
 		Args:
 			t: time points (vector or scalar)
 			p: parameter vector [K, r, t_i, a]
 		Returns:
-			Vector{Float64} (or Float64): K / [1 + exp(-r (t - t_i))]^(1/a)
+			Vector{Float64} (or Float64): K [1 + a exp(-r (t - t_i))]^(-1/a)
 		Notes:
-			Model function passed to LsqFit.curve_fit. Moved out of
-			fit_richards to module scope; the formula is unchanged.
-			Overflow of exp() yields Inf in the denominator and 0.0 in the
-			result, which is the correct limit.
+			Model function passed to LsqFit.curve_fit. t_i is the inflection
+			time: setting the second derivative to zero gives
+			a exp(-r (t - t_i)) = a, so the inflection, and the peak of
+			incidence, falls at t = t_i for every a > -1. At a = -1 incidence
+			is largest at the start, which is t_i.
+			The shape a runs from -1 to 10 (12 October 2026). Evaluation is
+			delegated to richards_value, which handles a = 0 (Gompertz) and
+			the zero stretch before the start of a curve with a < 0.
 		"""
 
-		#	Unpack and evaluate
+		#	Unpack and evaluate point by point
 			K, r, ti, a = p
-			return K ./ (1.0 .+ exp.(-r .* (t .- ti))) .^ (1.0 / a)
+			return richards_value.(t, K, r, ti, a)
 	end
+	@doc raw"""
+	**Description**
+	The Richards curve in its inflection-time form, the model fitted by `fit_richards`.
+
+	**Usage**
+	`richards_curve(t, [K, r, t_i, a])`
+
+	**Details**
+	``y(t) = K \left[1 + a\, e^{-r (t - t_i)}\right]^{-1/a}, \qquad -1 \le a \le 10.``
+
+	Three classic growth curves are members of the family:
+
+	| a | Curve | Formula | Incidence |
+	|---|-------|---------|-----------|
+	| 1 | Logistic | ``K / (1 + e^{-r(t - t_i)})`` | Symmetric; peak at half of ``K`` |
+	| 0 | Gompertz | ``K \exp(-e^{-r(t - t_i)})`` | Peak at ``K/e``, about 37% of ``K`` |
+	| -1 | Monomolecular | ``K \max(0, 1 - e^{-r(t - t_i)})`` | Largest at the start, ``t_i``, then declining |
+
+	For ``a < 0`` the curve is exactly 0 until the start time ``t_0 = t_i + \ln(-a)/r`` (see `richards_start`) and rises like ``(t - t_0)^{-1/a}`` after it. For ``-1 < a`` the inflection, and so the peak of incidence, is at ``t_i``.
+
+	**Value**
+	`Float64`, or a vector of them when `t` is a vector.
+
+	**See Also**
+	`fit_richards`, `richards_start`, `inflection_fraction`
+	""" richards_curve
+
+#	Start Time of a Richards Curve
+	function richards_start(r::Float64, t_i::Float64, a::Float64)::Float64
+		"""
+		Args:
+			r::Float64: growth rate
+			t_i::Float64: inflection time
+			a::Float64: asymmetry exponent
+		Returns:
+			Float64: t_0 = t_i + ln(-a)/r for a < 0, or -Inf for a ≥ 0
+		Notes:
+			A curve with a ≥ 0 approaches 0 only as t → -∞, so it has no
+			start; -Inf records that. For a < 0 the curve is 0 before t_0.
+			Added 12 October 2026 with the negative range of a.
+		"""
+
+		#	Finite start only for a negative shape
+			return a < 0.0 ? t_i + log(-a) / r : -Inf
+	end
+	@doc raw"""
+	**Description**
+	The day a Richards curve with ``a < 0`` begins to rise.
+
+	**Usage**
+	`richards_start(r, t_i, a)`
+
+	**Details**
+	For ``a < 0``, ``1 + a e^{-r(t - t_i)}`` reaches 0 at ``t_0 = t_i + \ln(-a)/r``, and the curve is 0 before that day. At ``a = -1``, ``t_0 = t_i``. For ``a \ge 0`` there is no finite start, and the function returns `-Inf`. For a simulated epidemic seeded on day 0, a fitted ``t_0`` near 0 is expected; a ``t_0`` well after 0 points to a smoldering phase before takeoff.
+
+	**Value**
+	`Float64`.
+
+	**See Also**
+	`richards_curve`, `fit_richards`
+	""" richards_start
+
+#	Share of the Final Size Reached at the Inflection
+	function inflection_fraction(a::Float64)::Float64
+		"""
+		Args:
+			a::Float64: asymmetry exponent (≥ -1)
+		Returns:
+			Float64: y(t_i)/K = (1 + a)^(-1/a)
+		Notes:
+			Computed as exp(-log1p(a)/a) for accuracy at small |a|.
+			Equals 1/e at a = 0 (Gompertz), 0 at a = -1 (monomolecular),
+			and 1/2 at a = 1 (logistic); it rises with a toward 1.
+			Added 12 October 2026 as the shape summary for the run record.
+		"""
+
+		#	Gompertz and monomolecular limits, then the general case
+			if a == 0.0
+				return exp(-1.0)
+			elseif a == -1.0
+				return 0.0
+			end
+			return exp(-log1p(a) / a)
+	end
+	@doc raw"""
+	**Description**
+	The share of the final size reached by the inflection time, a direct reading of the curve's shape.
+
+	**Usage**
+	`inflection_fraction(a)`
+
+	**Details**
+	``\phi(a) = y(t_i)/K = (1 + a)^{-1/a}``, which increases with ``a``:
+
+	| a | -1 | -0.5 | 0 | 1 | 10 |
+	|---|----|------|---|---|----|
+	| ``\phi`` | 0 | 0.25 | 0.37 | 0.50 | 0.79 |
+
+	A small ``\phi`` means a front-loaded epidemic: incidence peaks early, before most infections occur, and is followed by a long tail. Unlike ``a``, ``\phi`` is bounded in ``[0, 1)`` and has a direct reading, so it is reported in the run record as `frac_at_inflection`.
+
+	**Value**
+	`Float64` in ``[0, 1)``.
+
+	**See Also**
+	`richards_curve`, `fit_richards`
+	""" inflection_fraction
 
 #	Helper Function for fit_richards: test whether a parameter sits on a bound
 	function at_bound(x::Float64, lo::Float64, hi::Float64; rtol::Float64=1e-6)
@@ -186,81 +352,90 @@ using Random
 			return (x - lo) <= tol || (hi - x) <= tol
 	end
 
-#	Richards Peak Timing and Incidence
-	function richards_peak(K::Float64, r::Float64, t_i::Float64, a::Float64)
+#	Richards Peak Incidence
+	function peak_incidence(K::Float64, r::Float64, a::Float64)::Float64
 		"""
 		Args:
 			K::Float64: final size (beyond the offset)
 			r::Float64: growth rate
-			t_i::Float64: inflection time parameter
 			a::Float64: asymmetry exponent
 		Returns:
-			NamedTuple: (t_peak::Float64, peak_incidence::Float64)
+			Float64: the largest value of dC/dt, K r (1 + a)^(-(1 + a)/a)
 		Notes:
-			dC/dt peaks at t_peak = t_i - ln(a)/r with value
-			K * r * (1 + a)^(-(1 + a)/a). t_peak equals t_i only when a = 1.
-			These corrected expressions replace the formula previously
-			quoted in the roadmap (§2.3), which holds only for a = 1.
+			dC/dt peaks at the inflection time t_i, so its timing needs no
+			separate function. The height does not depend on t_i.
+			Replaces richards_peak, which returned the peak time from the
+			former location constant; that time is now t_i itself.
+			Computed as exp(-(1 + a) log1p(a)/a). The limits are taken
+			exactly: K r/e at a = 0 (Gompertz) and K r at a = -1
+			(monomolecular, where incidence is largest at the start).
 		"""
 
-		#	Peak time and peak incidence
-			t_peak = t_i - log(a) / r
-			peak_incidence = K * r * (1.0 + a)^(-(1.0 + a) / a)
+		#	Gompertz and monomolecular limits
+			if a == 0.0
+				return K * r * exp(-1.0)
+			elseif a == -1.0
+				return K * r
+			end
 
-		#	Assembling Result
-			return (t_peak=t_peak, peak_incidence=peak_incidence)
+		#	Height of the incidence peak
+			return K * r * exp(-(1.0 + a) * log1p(a) / a)
 	end
 	@doc raw"""
 	**Description**
-	Time and height of peak incidence for a Richards curve.
+	Height of peak incidence for a Richards curve.
 
 	**Usage**
-	`richards_peak(K, r, t_i, a)`
+	`peak_incidence(K, r, a)`
 
 	**Details**
-	For ``C(t) = K[1 + e^{-r(t - t_i)}]^{-1/a}``, the incidence ``\dot C(t)`` is maximal at
+	For ``C(t) = K[1 + a e^{-r(t - t_i)}]^{-1/a}``, the incidence ``\dot C(t)`` is maximal at the inflection time ``t_i``, with
 
-	``t^* = t_i - \frac{\ln a}{r}, \qquad \dot C(t^*) = K r (1 + a)^{-(1 + a)/a}.``
+	``\dot C(t_i) = K r (1 + a)^{-(1 + a)/a}.``
 
-	The parameter ``t_i`` is the peak time only when ``a = 1``, where ``\dot C(t^*) = Kr/4``. Under noise, ``r``, ``t_i``, and ``a`` are individually weakly identified, but ``t^*`` and ``\dot C(t^*)`` are recovered reliably, so they are reported with every fit.
+	For ``a = 1`` this is ``Kr/4``; at ``a = 0`` (Gompertz) it is ``Kr/e``; at ``a = -1`` (monomolecular) it is ``Kr``, reached at the start of the curve. Under noise, ``r`` and ``a`` are individually weakly identified, but the peak incidence is recovered reliably, so it is reported with every fit.
 
 	**Value**
-	`NamedTuple` `(t_peak, peak_incidence)`.
+	`Float64`.
 
 	**See Also**
-	`fit_richards`
-	""" richards_peak
+	`fit_richards`, `peak_prevalence`
+	""" peak_incidence
 
 #	Helper Function for fit_richards: assemble a fit result
 	function fit_result(K::Float64, r::Float64, ti::Float64, a::Float64,
-						fit_ok::Bool, extinct::Bool, status::Symbol)
+						fit_ok::Bool, extinct::Bool, status::Symbol; rmse::Float64=NaN)
 		"""
 		Args:
 			K, r, ti, a::Float64: fitted (or NaN) Richards parameters
 			fit_ok::Bool: true only for a usable fit
 			extinct::Bool: true if the run was classified as extinct
 			status::Symbol: reason code (see fit_richards)
+			rmse::Float64: root-mean-square residual of a completed fit (default = NaN)
 		Returns:
-			NamedTuple: K, r_growth, t_i, a, t_peak, peak_incidence, fit_ok, extinct, status
+			NamedTuple: K, r_growth, t_i, a, frac_at_inflection, peak_incidence, fit_rmse,
+						fit_ok, extinct, viable, status
 		Notes:
 			Replaces the nested result constructor that used to sit inside
-			fit_richards. Peak timing and incidence are computed whenever
-			all four parameters are finite.
+			fit_richards. Peak incidence and the inflection fraction are
+			computed whenever all four parameters are finite and a ≥ -1.
+			t_i is the inflection time, so the former t_peak field would
+			duplicate it and has been removed.
 		"""
 
-		#	Derived peak quantities
-			if all(isfinite, (K, r, ti, a)) && r > 0.0 && a > 0.0
-				pk = richards_peak(K, r, ti, a)
-				t_peak = pk.t_peak
-				peak_inc = pk.peak_incidence
+		#	Derived shape and peak quantities
+			if all(isfinite, (K, r, ti, a)) && r > 0.0 && a >= -1.0
+				frac = inflection_fraction(a)
+				peak_inc = peak_incidence(K, r, a)
 			else
-				t_peak = NaN
+				frac = NaN
 				peak_inc = NaN
 			end
 
 		#	Assembling Result
-			return (K=K, r_growth=r, t_i=ti, a=a, t_peak=t_peak, peak_incidence=peak_inc,
-					fit_ok=fit_ok, extinct=extinct, status=status)
+			return (K=K, r_growth=r, t_i=ti, a=a, frac_at_inflection=frac, peak_incidence=peak_inc,
+					fit_rmse=rmse, fit_ok=fit_ok, extinct=extinct, viable=(status != :nonstarter),
+					status=status)
 	end
 
 #	Fit Richards Growth Model
@@ -270,6 +445,7 @@ using Random
 						  min_points::Int=5,
 						  min_transition_points::Int=3,
 						  bound_rtol::Float64=1e-6,
+						  nonstarter_tol::Float64=1e-12,
 						  max_iter::Int=2000)
 		"""
 		Args:
@@ -280,24 +456,50 @@ using Random
 			min_points::Int: minimum number of data points required (default = 5)
 			min_transition_points::Int: minimum observations between 10% and 90% of the fitted K (default = 3)
 			bound_rtol::Float64: tolerance for the boundary check, as a fraction of each bound range (default = 1e-6)
+			nonstarter_tol::Float64: C[end] - C0 at or below this → non-starter (default = 1e-12)
 			max_iter::Int: iteration limit passed to LsqFit (default = 2000)
 		Returns:
 			NamedTuple with fields:
 				K::Float64: fitted final size beyond C0
 				r_growth::Float64: fitted per-capita growth rate
-				t_i::Float64: fitted inflection time parameter
-				a::Float64: fitted asymmetry exponent
-				t_peak::Float64: time of peak incidence, t_i - ln(a)/r
+				t_i::Float64: fitted inflection time, the day of peak incidence
+				a::Float64: fitted asymmetry exponent, in [-1, 10]
+				frac_at_inflection::Float64: share of K reached at t_i, (1 + a)^(-1/a)
 				peak_incidence::Float64: peak of dC/dt, K r (1 + a)^(-(1 + a)/a)
+				fit_rmse::Float64: root-mean-square residual of the fit (NaN when no fit completed)
 				fit_ok::Bool: true only for a usable fit
-				extinct::Bool: true if C[end] - C0 < extinction_threshold
-				status::Symbol: :ok, :extinct, :too_few_points, :invalid_data,
-								:no_convergence, :boundary, :too_steep,
-								:implausible, or :error
+				extinct::Bool: true if 0 < C[end] - C0 < extinction_threshold
+				viable::Bool: false for a non-starter (no transmission at all)
+				status::Symbol: :ok, :nonstarter, :extinct, :too_few_points,
+								:invalid_data, :no_convergence, :boundary,
+								:too_steep, :implausible, or :error
 		Notes:
 			Option A (open decision 1, 12 October 2026): the known offset C0
 			is subtracted before fitting, so K is the share infected beyond
 			the seeds and extinction is judged on growth beyond the seeds.
+			Conditioning assumption (12 October 2026): a run with no
+			transmission at all is not an exercise of the model. It is
+			classified as a non-starter (viable = false) and is excluded
+			from fitting, training, and target evaluation.
+			Inflection form (12 October 2026): the fitted parameters are
+			(K, r, t_i, a), with t_i the inflection time. The former location
+			constant, bounded below by 0, rejected 75 of 100 simulated village
+			epidemics whose early peaks put that constant just below 0. The
+			inflection time always lies within the horizon.
+			Negative shapes (12 October 2026): with a > 0 the curve cannot
+			inflect before reaching 1/e of K, and 64 of 85 established
+			village runs pinned a at its former lower bound of 1e-6, with
+			the largest residuals and inflection times later than the
+			observed incidence peak. a now runs from -1 to 10. Gompertz
+			(a = 0) is an interior point. Values below 0 describe a
+			front-loaded epidemic: a definite start, an early peak, and a
+			long tail. a = -1, the monomolecular curve, is a natural limit
+			(no acceleration at all) and is not flagged; a fit near -1 is a
+			result to examine, since it implies incidence driven by the
+			remaining susceptibles alone.
+			fit_rmse is computed over every day of the series, so a long flat
+			tail after extinction lowers it; compare it across runs of the
+			same horizon.
 			No exception propagates out of this function; every failure
 			returns fit_ok = false with a status code.
 		"""
@@ -314,14 +516,20 @@ using Random
 		#	Subtract the known offset (Option A)
 			y = C .- C0
 
+		#	Check for a non-starter: the seeds infected no one
+			if y[end] <= nonstarter_tol
+				return fit_result(NaN, NaN, NaN, NaN, false, false, :nonstarter)
+			end
+
 		#	Check for extinction: growth beyond the seeds is below threshold
 			if y[end] < extinction_threshold
 				return fit_result(NaN, NaN, NaN, NaN, false, true, :extinct)
 			end
 
 		#	Compute initial parameter guesses from data
-		#	t_i0 uses the first crossing of half the final size, which is
-		#	less sensitive to noise than the largest single-day increase
+		#	t_i0 uses the first crossing of half the final size (the inflection of a
+		#	logistic curve, a0 = 1), which is less sensitive to noise than the
+		#	largest single-day increase
 			K0 = y[end]
 			r0 = 0.3
 			half_idx = findfirst(>=(K0 / 2.0), y)
@@ -329,9 +537,10 @@ using Random
 			a0 = 1.0
 			p0 = [K0, r0, t_i0, a0]
 
-		#	Set parameter bounds; K cannot exceed the susceptible share 1 - C0
+		#	Set parameter bounds on (K, r, t_i, a); K cannot exceed 1 - C0
+		#	a = -1 (monomolecular) is the natural lower limit of the family
 			T_max = t[end]
-			lower = [0.0,      0.001, 0.0,   0.1]
+			lower = [0.0,      0.001, 0.0,   -1.0]
 			upper = [1.0 - C0, 5.0,   T_max, 10.0]
 
 		#	Clamp initial guesses to bounds
@@ -353,32 +562,36 @@ using Random
 						return fit_result(NaN, NaN, NaN, NaN, false, false, :error)
 					end
 
+				#	Root-mean-square residual over the series
+					rmse = sqrt(sum(abs2, fit.resid) / length(fit.resid))
+
 				#	Check convergence: LsqFit returns rather than throws when it stops early
 					if !fit.converged
-						return fit_result(K_fit, r_fit, ti_fit, a_fit, false, false, :no_convergence)
+						return fit_result(K_fit, r_fit, ti_fit, a_fit, false, false, :no_convergence; rmse=rmse)
 					end
 
 				#	Check for implausible fit
 					if K_fit < extinction_threshold
-						return fit_result(K_fit, r_fit, ti_fit, a_fit, false, false, :implausible)
+						return fit_result(K_fit, r_fit, ti_fit, a_fit, false, false, :implausible; rmse=rmse)
 					end
 
-				#	Check bounds on r, t_i, and a; K may legitimately reach 1 - C0
+				#	Check bounds on r, t_i, and the upper bound of a
+				#	K may reach 1 - C0 (everyone infected); a may reach -1 (monomolecular)
 					if at_bound(r_fit, lower[2], upper[2]; rtol=bound_rtol) ||
 					   at_bound(ti_fit, lower[3], upper[3]; rtol=bound_rtol) ||
-					   at_bound(a_fit, lower[4], upper[4]; rtol=bound_rtol)
-						return fit_result(K_fit, r_fit, ti_fit, a_fit, false, false, :boundary)
+					   (upper[4] - a_fit) <= bound_rtol * (upper[4] - lower[4])
+						return fit_result(K_fit, r_fit, ti_fit, a_fit, false, false, :boundary; rmse=rmse)
 					end
 
 				#	Check that the rise is resolved by the time grid
 				#	A near-vertical step leaves no observations between 10% and 90% of K
 					n_transition = count(v -> 0.1 * K_fit <= v <= 0.9 * K_fit, y)
 					if n_transition < min_transition_points
-						return fit_result(K_fit, r_fit, ti_fit, a_fit, false, false, :too_steep)
+						return fit_result(K_fit, r_fit, ti_fit, a_fit, false, false, :too_steep; rmse=rmse)
 					end
 
 				#	Assembling Result
-					return fit_result(K_fit, r_fit, ti_fit, a_fit, true, false, :ok)
+					return fit_result(K_fit, r_fit, ti_fit, a_fit, true, false, :ok; rmse=rmse)
 
 			catch e
 				#	Numerical failure inside LsqFit
@@ -387,12 +600,13 @@ using Random
 	end
 	@doc raw"""
 	**Description**
-	Fit the Richards growth model to cumulative incidence data using nonlinear least squares, after subtracting the known initial offset. Returns fitted parameters, peak timing and incidence, and diagnostic flags for degenerate trajectories.
+	Fit the Richards growth model to cumulative incidence data using nonlinear least squares, after subtracting the known initial offset. Returns fitted parameters, peak incidence, the residual error, and diagnostic flags for degenerate trajectories.
 
 	**Usage**
 	```julia
 	fit_richards(t, C; C0=0.0, extinction_threshold=0.02, min_points=5,
-				 min_transition_points=3, bound_rtol=1e-6, max_iter=2000)
+				 min_transition_points=3, bound_rtol=1e-6, nonstarter_tol=1e-12,
+				 max_iter=2000)
 	```
 
 	**Arguments**
@@ -403,12 +617,28 @@ using Random
 	- `min_points::Int`: Minimum number of data points required for fitting (default `5`).
 	- `min_transition_points::Int`: Minimum number of observations between 10% and 90% of the fitted `K` (default `3`).
 	- `bound_rtol::Float64`: Tolerance for the boundary check, as a fraction of each parameter's bound range (default `1e-6`).
+	- `nonstarter_tol::Float64`: If `C[end] - C0` is at or below this value, the seeds infected no one and the run is a non-starter (default `1e-12`).
 	- `max_iter::Int`: Iteration limit passed to `LsqFit` (default `2000`).
 
 	**Details**
-	The model fitted to ``y(t) = C(t) - C_0`` is:
+	The model fitted to ``y(t) = C(t) - C_0`` is the Richards curve written in terms of its inflection time:
 
-	``y(t) = \frac{K}{[1 + \exp(-r \cdot (t - t_i))]^{1/a}}``
+	``y(t) = K \left[1 + a\, e^{-r (t - t_i)}\right]^{-1/a}``
+
+	The inflection of ``y``, and so the peak of incidence, falls at ``t_i`` for every ``a > -1``. For ``a > 0`` the curve is identical to ``K / [1 + e^{-r(t - \ell)}]^{1/a}`` with location constant ``\ell = t_i + \ln(a)/r``, which is the inflection only when ``a = 1``. For early-peaking epidemics ``\ell`` falls below 0, so it is not reported.
+
+	The shape ``a`` runs from ``-1`` to ``10``, so the family includes the logistic (``a = 1``), Gompertz (``a = 0``), and monomolecular (``a = -1``) curves:
+
+	| a | Share of ``K`` at the peak of incidence | Reading |
+	|---|------------------------------------------|---------|
+	| 1 | 0.50 | Symmetric rise and fall, as under homogeneous mixing |
+	| 0 | 0.37 | Brief acceleration, then a long tail |
+	| -0.5 | 0.25 | Front-loaded: a definite start, an early peak, a longer tail |
+	| -1 | 0 | No acceleration: incidence is largest on the first day |
+
+	A curve with ``a < 0`` is 0 until ``t_0 = t_i + \ln(-a)/r`` (`richards_start`), so it has a definite start, as a single introduced seed does. Before 12 October 2026 the lower bound on ``a`` was ``10^{-6}``; with ``a > 0`` the curve cannot inflect before reaching ``1/e`` of ``K``, and most simulated village epidemics pinned ``a`` at that bound, with larger residuals and a late ``t_i``. Front-loading changes timing and asymmetry far more than height: at a fixed final size and rise time, the peak incidence at ``a = -0.5`` is only about 18% above the logistic value.
+
+	The share of ``K`` reached at the inflection, ``(1 + a)^{-1/a}``, is reported as `frac_at_inflection` (`inflection_fraction`). It is bounded in ``[0, 1)`` and reads directly, so it is the preferred shape summary.
 
 	Subtracting the known offset (Option A) keeps the fit at four parameters and makes `K` the share of the population infected beyond the seeds. The extinction rule then works for any number of seed nodes.
 
@@ -424,33 +654,38 @@ using Random
 	|-----------|-------|-------|-------|
 	| K | 0.0 | 1 - C0 | Share infected beyond the seeds |
 	| r | 0.001 | 5.0 | Growth rate; upper bound prevents divergence |
-	| t_i | 0.0 | T_max | Inflection parameter within the horizon |
-	| a | 0.1 | 10.0 | Shape parameter; a=1 is logistic |
+	| t_i | 0.0 | T_max | Inflection time within the horizon |
+	| a | -1.0 | 10.0 | Shape: 1 logistic, 0 Gompertz, -1 monomolecular |
 
 	Degenerate trajectory handling (`status` in parentheses):
 	- **Too few points** (`:too_few_points`): `length(t) < min_points`.
+	- **Non-starter** (`:nonstarter`): `C[end] - C0 ≤ nonstarter_tol`, so the seeds infected no one; `viable=false`. Every analysis is conditioned on at least one transmission, so a non-starter is not an exercise of the model and is excluded throughout.
 	- **Invalid data** (`:invalid_data`): mismatched lengths, non-finite values, or `C0` outside `[0, 1)`.
 	- **Extinction** (`:extinct`): `C[end] - C0 < extinction_threshold`; `extinct=true`.
 	- **Non-convergence** (`:no_convergence`): `LsqFit` stopped without meeting its convergence tolerances. `LsqFit` reports this through `converged = false` rather than by throwing.
 	- **Implausible fit** (`:implausible`): fitted `K < extinction_threshold`.
-	- **Boundary fit** (`:boundary`): `r`, `t_i`, or `a` on a bound. `K` may reach `1 - C0`, which means everyone beyond the seeds was infected.
+	- **Boundary fit** (`:boundary`): `r` or `t_i` on either bound, or `a` on its upper bound. `K` may reach `1 - C0`, which means everyone beyond the seeds was infected, and `a` may reach `-1`, the monomolecular curve. Both are natural limits of what they measure, so neither is flagged.
 	- **Too steep** (`:too_steep`): fewer than `min_transition_points` observations between 10% and 90% of the fitted `K`, so the rise is not resolved by the time grid.
 	- **Numerical error** (`:error`): `LsqFit` threw, or returned non-finite parameters.
 
 	No exception propagates out of `fit_richards`. When `fit_ok=false`, parameters are `NaN` for failures that occur before or during fitting, and the fitted values are returned for diagnostic inspection when a fit completed but failed a check.
 
-	Under noise, `r`, `t_i`, and `a` trade off against one another and are individually weakly identified. `t_peak` and `peak_incidence` are recovered reliably and are reported with every fit (see `richards_peak`).
+	Under noise, `r` and `a` trade off against one another and are individually weakly identified. `K`, `t_i`, and `peak_incidence` are recovered reliably.
+
+	`fit_rmse` is the root-mean-square difference between the fitted curve and the data over every day of the series. It is reported for every fit that completed, including fits that fail a later check, and is `NaN` otherwise. Because the days after extinction are flat and well fitted, it should be compared across runs of the same horizon.
 
 	**Value**
 	A `NamedTuple` with fields:
 	- `K::Float64`: Fitted final size beyond `C0`.
 	- `r_growth::Float64`: Fitted per-capita growth rate.
-	- `t_i::Float64`: Fitted inflection time parameter.
-	- `a::Float64`: Fitted asymmetry exponent.
-	- `t_peak::Float64`: Time of peak incidence.
+	- `t_i::Float64`: Fitted inflection time, the day of peak incidence.
+	- `a::Float64`: Fitted asymmetry exponent, in ``[-1, 10]``.
+	- `frac_at_inflection::Float64`: Share of `K` reached at `t_i`, ``(1 + a)^{-1/a}``.
 	- `peak_incidence::Float64`: Peak of ``\dot C``.
+	- `fit_rmse::Float64`: Root-mean-square residual of the fit.
 	- `fit_ok::Bool`: `true` if fitting succeeded and passed every check.
-	- `extinct::Bool`: `true` if the run was classified as extinct.
+	- `extinct::Bool`: `true` if the run was classified as extinct (some transmission, but growth beyond the seeds below `extinction_threshold`).
+	- `viable::Bool`: `false` for a non-starter.
 	- `status::Symbol`: Reason code, `:ok` for a usable fit.
 
 	**Examples**
@@ -462,7 +697,7 @@ using Random
 	#	Recover parameters, passing the known offset
 		fit = fit_richards(t, result.C; C0=3/150)
 		println("K: ", fit.K, "  r: ", fit.r_growth, "  t_i: ", fit.t_i, "  a: ", fit.a)
-		println("t_peak: ", fit.t_peak, "  status: ", fit.status)
+		println("fit_rmse: ", fit.fit_rmse, "  status: ", fit.status)
 	```
 
 	**References**
@@ -470,7 +705,7 @@ using Random
 	*Journal of Experimental Botany*, 10(2), 290–301.
 
 	**See Also**
-	`simulate_richards`, `richards_peak`, `LsqFit.curve_fit`
+	`simulate_richards`, `richards_curve`, `richards_start`, `inflection_fraction`, `peak_incidence`, `LsqFit.curve_fit`
 	""" fit_richards
 
 # ============================================================
@@ -616,7 +851,7 @@ using Random
 			Float64: P_max = I_max * E[D]
 		Notes:
 			I_max = K r (1 + a)^(-(1 + a)/a) is the peak incidence of the
-			Richards curve (richards_peak; t_i does not affect its height).
+			Richards curve (peak_incidence; t_i does not affect its height).
 			E[D] is the mean of the discretized recovery duration
 			(discrete_weibull_mean). P_max approximates peak prevalence by
 			treating incidence as constant near the peak for one mean
@@ -625,7 +860,7 @@ using Random
 		"""
 
 		#	Peak incidence times mean infectious duration
-			I_max = richards_peak(K, r, 0.0, a).peak_incidence
+			I_max = peak_incidence(K, r, a)
 			return I_max * discrete_weibull_mean(rec_scale, rec_shape)
 	end
 	@doc raw"""
@@ -644,7 +879,7 @@ using Random
 	`Float64` proportion of the population.
 
 	**See Also**
-	`richards_peak`, `discrete_weibull_mean`, `in_target`
+	`peak_incidence`, `discrete_weibull_mean`, `in_target`
 	""" peak_prevalence
 
 #	Helper Function for evaluate_target: test one optional upper bound
@@ -671,27 +906,48 @@ using Random
 							 K::Float64, r::Float64, ti::Float64, a::Float64;
 							 C0::Float64=0.0,
 							 rec_scale::Union{Float64, Nothing}=nothing,
-							 rec_shape::Union{Float64, Nothing}=nothing)
+							 rec_shape::Union{Float64, Nothing}=nothing,
+							 status::Symbol=:ok,
+							 extinct_policy::Symbol=:exclude,
+							 final_cum::Union{Float64, Nothing}=nothing)
 		"""
 		Args:
 			region::TargetRegion: acceptable outcome region
 			infected_t::Vector{Float64}: proportion currently infected on days 0, 1, ..., T
 										 (one value per day; summarize.jl expands the simulator log)
-			K, r, ti, a::Float64: fitted Richards parameters (K beyond C0)
+			K, r, ti, a::Float64: fitted Richards parameters (K beyond C0; ti the inflection time; NaN if not fitted)
 			C0::Float64: known initial offset, seeds/N (default = 0.0)
 			rec_scale, rec_shape: Weibull recovery parameters, required when P_max_thresh is set
+			status::Symbol: status from fit_richards (default = :ok)
+			extinct_policy::Symbol: :exclude, :success, or :failure for extinct runs (default = :exclude)
+			final_cum::Union{Float64, Nothing}: C(end), the final cumulative proportion;
+												needed to judge final size for an extinct run
 		Returns:
-			NamedTuple: (peak, surge, slope, prevalence, final_size, in_target)
-			Each constraint is true, false, or nothing (unconstrained).
+			NamedTuple: (peak, surge, slope, prevalence, final_size, in_target, class)
+			Each constraint is true, false, or nothing (unconstrained or not evaluated).
+			in_target is true, false, or nothing (excluded). class is :established,
+			:extinct, :nonstarter, or :fit_failed.
 		Notes:
-			Throws ArgumentError if P_max_thresh is set without rec_scale and
-			rec_shape, if infected_t is empty, or if surge_time lies beyond
-			the series. These are configuration errors, not data outcomes.
-			Non-finite Richards parameters (a failed or extinct fit) make
-			in_target false, as the roadmap specifies.
+			Every analysis is conditioned on at least one transmission
+			(12 October 2026). A non-starter is not an exercise of the model,
+			so in_target is nothing under every policy. Extinct runs follow
+			extinct_policy: :exclude (default) conditions on establishment,
+			:success counts a contained run as acceptable when it meets the
+			trajectory and final-size bounds, and :failure reproduces the
+			original roadmap rule. A failed fit of an established run is
+			excluded (nothing), because the failure reflects the curve fit
+			rather than the behavior being modeled; fit failure rates are
+			reported separately.
+			Throws ArgumentError for configuration errors: an unknown policy,
+			P_max_thresh without recovery parameters, an empty series, a
+			surge_time beyond the series, or an extinct run judged under
+			:success with K_max set but no final_cum.
 		"""
 
 		#	Validation of the configuration
+			if !(extinct_policy in (:exclude, :success, :failure))
+				throw(ArgumentError("extinct_policy must be :exclude, :success, or :failure"))
+			end
 			if region.P_max_thresh !== nothing && (rec_scale === nothing || rec_shape === nothing)
 				throw(ArgumentError("P_max_thresh is set, so rec_scale and rec_shape must be provided"))
 			end
@@ -702,6 +958,24 @@ using Random
 				throw(ArgumentError("surge_time $(region.surge_time) lies beyond the series (days 0 to $(length(infected_t) - 1))"))
 			end
 
+		#	Classify the run
+			fit_finite = all(isfinite, (K, r, ti, a))
+			if status == :nonstarter
+				class = :nonstarter
+			elseif status == :extinct
+				class = :extinct
+			elseif status == :ok && fit_finite
+				class = :established
+			else
+				class = :fit_failed
+			end
+
+		#	Early return: non-starters and failed fits are not evaluated
+			if class == :nonstarter || class == :fit_failed
+				return (peak=nothing, surge=nothing, slope=nothing, prevalence=nothing,
+						final_size=nothing, in_target=nothing, class=class)
+			end
+
 		#	Trajectory constraints: peak, early-infection size, and slope
 			peak_ok = within_bound(maximum(infected_t), region.I_peak_max)
 			surge_ok = region.I_surge_max === nothing ? nothing :
@@ -709,57 +983,92 @@ using Random
 			max_slope = length(infected_t) > 1 ? maximum(diff(infected_t)) : 0.0
 			slope_ok = within_bound(max_slope, region.S_max)
 
-		#	Richards constraints: prevalence and final size
-			fit_finite = all(isfinite, (K, r, ti, a))
-			if region.P_max_thresh === nothing
-				prev_ok = nothing
-			else
-				p_max = fit_finite ? peak_prevalence(K, r, a, rec_scale, rec_shape) : NaN
-				prev_ok = within_bound(p_max, region.P_max_thresh)
-			end
-			final_ok = within_bound(fit_finite ? C0 + K : NaN, region.K_max)
+		#	Fit-based constraints for an established run
+			if class == :established
+				#	Prevalence from the fitted curve and the recovery distribution
+					prev_ok = region.P_max_thresh === nothing ? nothing :
+							  within_bound(peak_prevalence(K, r, a, rec_scale, rec_shape), region.P_max_thresh)
 
-		#	Conjunction of the constraints; a failed fit is never in target
-			checks = (peak_ok, surge_ok, slope_ok, prev_ok, final_ok)
-			all_ok = fit_finite && all(c -> c === nothing || c, checks)
+				#	Final size: total proportion ever infected
+					final_ok = within_bound(C0 + K, region.K_max)
+
+				#	Conjunction of the set constraints
+					checks = (peak_ok, surge_ok, slope_ok, prev_ok, final_ok)
+					all_ok = all(c -> c === nothing || c, checks)
+					return (peak=peak_ok, surge=surge_ok, slope=slope_ok, prevalence=prev_ok,
+							final_size=final_ok, in_target=all_ok, class=class)
+			end
+
+		#	Extinct run: no fitted curve, so use the observed series
+		#	Prevalence falls back to the observed peak; final size uses C(end)
+			if extinct_policy == :success && region.K_max !== nothing && final_cum === nothing
+				throw(ArgumentError("final_cum is required to judge final size for an extinct run under :success"))
+			end
+			prev_ok = region.P_max_thresh === nothing ? nothing :
+					  within_bound(maximum(infected_t), region.P_max_thresh)
+			final_ok = (region.K_max === nothing || final_cum === nothing) ? nothing :
+					   within_bound(final_cum, region.K_max)
+
+		#	Apply the extinct-run policy
+			if extinct_policy == :exclude
+				in_tgt = nothing
+			elseif extinct_policy == :failure
+				in_tgt = false
+			else
+				checks = (peak_ok, surge_ok, slope_ok, prev_ok, final_ok)
+				in_tgt = all(c -> c === nothing || c, checks)
+			end
 
 		#	Assembling Result
 			return (peak=peak_ok, surge=surge_ok, slope=slope_ok, prevalence=prev_ok,
-					final_size=final_ok, in_target=all_ok)
+					final_size=final_ok, in_target=in_tgt, class=class)
 	end
 	@doc raw"""
 	**Description**
-	Evaluate each constraint of a `TargetRegion` for one simulated run and report which ones hold. `in_target` returns only the overall result.
+	Evaluate each constraint of a `TargetRegion` for one simulated run, classify the run, and report whether it lies in the acceptable region. `in_target` returns only the overall result.
 
 	**Usage**
 	```julia
-	evaluate_target(region, infected_t, K, r, ti, a; C0=0.0, rec_scale=nothing, rec_shape=nothing)
+	evaluate_target(region, infected_t, K, r, ti, a; C0=0.0, rec_scale=nothing, rec_shape=nothing,
+					status=:ok, extinct_policy=:exclude, final_cum=nothing)
 	```
 
 	**Arguments**
 	- `region::TargetRegion`: The acceptable outcome region.
 	- `infected_t::Vector{Float64}`: Proportion currently infected on each day, starting at day 0, one value per day.
-	- `K, r, ti, a::Float64`: Fitted Richards parameters, with `K` measured beyond `C0`.
+	- `K, r, ti, a::Float64`: Fitted Richards parameters, with `K` measured beyond `C0` and `ti` the inflection time (`NaN` when no fit exists).
 	- `C0::Float64`: Known initial offset, seeds/N (default `0.0`).
 	- `rec_scale, rec_shape`: Weibull recovery parameters, required when `P_max_thresh` is set.
+	- `status::Symbol`: The `status` returned by `fit_richards` (default `:ok`).
+	- `extinct_policy::Symbol`: `:exclude` (default), `:success`, or `:failure` for extinct runs.
+	- `final_cum`: Final cumulative proportion C(end); required to judge final size for an extinct run under `:success`.
 
 	**Details**
-	The five constraints:
+	Every analysis is conditioned on at least one transmission. Runs fall into four classes:
+
+	| Class | Source | `in_target` |
+	|-------|--------|-------------|
+	| `:nonstarter` | `status == :nonstarter` (the seeds infected no one) | `nothing` under every policy |
+	| `:extinct` | `status == :extinct` (some transmission, growth below the extinction threshold) | set by `extinct_policy` |
+	| `:established` | `status == :ok` with finite parameters | evaluated on all set constraints |
+	| `:fit_failed` | any other status | `nothing` (excluded) |
+
+	For an established run, the five constraints are:
 	1. **Peak infection size**: ``\max_t I(t) \le`` `I_peak_max`.
 	2. **Early-infection size**: ``I(t_{\text{surge}}) \le`` `I_surge_max`, read at index `surge_time + 1`.
 	3. **Slope**: ``\max_t \Delta I(t) \le`` `S_max`.
 	4. **Prevalence**: `peak_prevalence(K, r, a, rec_scale, rec_shape)` ``\le`` `P_max_thresh`.
 	5. **Final size**: ``C_0 + K \le`` `K_max`, the total proportion ever infected.
 
-	Constraints 1 to 3 come from the trajectory; 4 and 5 come from the Richards fit. Constraint 1 is the observed peak; constraint 4 is the model-based peak from the fitted curve and the recovery distribution. If any Richards parameter is non-finite (a failed or extinct fit), `in_target` is `false`.
+	An extinct run has no fitted curve, so constraint 4 uses the observed peak and constraint 5 uses `final_cum`. Under `:exclude`, which conditions on establishment, `in_target` is `nothing`; under `:failure` it is `false` (the original roadmap rule); under `:success` it is evaluated on those observed quantities.
 
-	`ArgumentError` is thrown for configuration errors: `P_max_thresh` set without the recovery parameters, an empty series, or a `surge_time` beyond the series.
+	`ArgumentError` is thrown for configuration errors: an unknown policy, `P_max_thresh` set without the recovery parameters, an empty series, a `surge_time` beyond the series, or an extinct run judged under `:success` with `K_max` set but no `final_cum`.
 
 	**Value**
-	`NamedTuple` `(peak, surge, slope, prevalence, final_size, in_target)`. Each constraint is `true`, `false`, or `nothing` when unconstrained.
+	`NamedTuple` `(peak, surge, slope, prevalence, final_size, in_target, class)`. Each constraint is `true`, `false`, or `nothing`; `in_target` is `true`, `false`, or `nothing` when the run is excluded.
 
 	**See Also**
-	`in_target`, `TargetRegion`, `peak_prevalence`
+	`in_target`, `TargetRegion`, `peak_prevalence`, `fit_richards`
 	""" evaluate_target
 
 #	Target Region Evaluation
@@ -768,32 +1077,40 @@ using Random
 					   K::Float64, r::Float64, ti::Float64, a::Float64;
 					   C0::Float64=0.0,
 					   rec_scale::Union{Float64, Nothing}=nothing,
-					   rec_shape::Union{Float64, Nothing}=nothing)::Bool
+					   rec_shape::Union{Float64, Nothing}=nothing,
+					   status::Symbol=:ok,
+					   extinct_policy::Symbol=:exclude,
+					   final_cum::Union{Float64, Nothing}=nothing)::Union{Bool, Nothing}
 		"""
 		Args:
 			Same as evaluate_target.
 		Returns:
-			Bool: true if every set constraint holds and the fit is finite
+			Union{Bool, Nothing}: true or false for an evaluated run; nothing
+			for a non-starter, a failed fit, or an extinct run under :exclude
 		Notes:
-			Signature follows roadmap §4.3, with C0 added for Option A.
+			Signature follows roadmap §4.3, with C0 added for Option A and
+			status, extinct_policy, and final_cum added for run classification.
+			In the JSONL record, nothing is written as null.
 		"""
 
 		#	Delegate to the detailed evaluation
 			return evaluate_target(region, infected_t, K, r, ti, a;
-								   C0=C0, rec_scale=rec_scale, rec_shape=rec_shape).in_target
+								   C0=C0, rec_scale=rec_scale, rec_shape=rec_shape,
+								   status=status, extinct_policy=extinct_policy,
+								   final_cum=final_cum).in_target
 	end
 	@doc raw"""
 	**Description**
-	The binary indicator ``\mathbf{1}[\mathbf{x} \in \mathcal{A}]`` for one simulated run, stored as `in_target` in the output record.
+	The indicator ``\mathbf{1}[\mathbf{x} \in \mathcal{A}]`` for one simulated run, stored as `in_target` in the output record, or `nothing` (JSON `null`) when the run is excluded.
 
 	**Usage**
-	`in_target(region, infected_t, K, r, ti, a; C0=0.0, rec_scale=nothing, rec_shape=nothing)`
+	`in_target(region, infected_t, K, r, ti, a; C0=0.0, rec_scale=nothing, rec_shape=nothing, status=:ok, extinct_policy=:exclude, final_cum=nothing)`
 
 	**Details**
-	Returns `evaluate_target(...).in_target`. An all-`nothing` region returns `true` for any run with a finite fit.
+	Returns `evaluate_target(...).in_target`. An all-`nothing` region returns `true` for any established run.
 
 	**Value**
-	`Bool`.
+	`Union{Bool, Nothing}`.
 
 	**See Also**
 	`evaluate_target`, `TargetRegion`
@@ -803,7 +1120,9 @@ using Random
 	export simulate_richards,
 		   fit_richards,
 		   richards_curve,
-		   richards_peak,
+		   richards_start,
+		   inflection_fraction,
+		   peak_incidence,
 		   TargetRegion,
 		   discrete_weibull_mean,
 		   peak_prevalence,
