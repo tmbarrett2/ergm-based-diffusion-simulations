@@ -367,7 +367,7 @@
 #	Paths (EC2 test data) and a scratch directory for outputs
 	graphml_path = "/workspace/ergm_data/sim_test_data/WeakCore1_3.2_2.graphml"
 	params_file = "/workspace/ergm-based-diffusion-simulations/sbi_tests/params_batch_ut14.json"
-	work_dir = mktempdir()
+	work_dir = mkpath("/workspace/ergm-based-diffusion-simulations/sbi_tests/output")
 	network_data = sim_prep(graphml_path)
 
 #	Warm-up (compilation) so that UT-1.8 timing excludes it
