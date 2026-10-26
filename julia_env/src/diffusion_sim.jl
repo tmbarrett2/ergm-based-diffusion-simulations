@@ -3,6 +3,8 @@ module diffusion_sim
     using CSV
     using DataFrames
 	using EzXML
+	using JSON3
+	using LinearAlgebra
 	using Random
     using Statistics
 	using StatsBase
@@ -789,6 +791,11 @@ module diffusion_sim
 			Exact SAS behavior: FIFO ordering, cumulative peer counts, and single-row padding at extinction.
 			With FixedDuration recovery, permanent immunity, and the default rng, the output matches the
 			validated simulator exactly, plus the appended prop_cum_infected column.
+			26 October 2026: the membership test in the waning-immunity block reads node j's
+			neighbors through a view instead of a copy. The test returns the same result, so
+			the output is unchanged. The copy allocated a new array for every check, the main
+			source of the 28 MiB measured per run. Verified by sirdif_equivalence_test.jl
+			against reference_sirdif_v2.jl.
 		"""
 
 		#	Cache network size
@@ -1024,7 +1031,7 @@ module diffusion_sim
 									state[i, RECOVERED_COL]   = 0
 									state[i, SUSCEPTIBLE_COL] = 1
 									for j in 1:n_nodes
-										if i != j && (unique_ids[i] in alst_vec[j][2:end])
+										if i != j && (unique_ids[i] in @view(alst_vec[j][2:end]))
 											push!(s_alst_vec[j], unique_ids[i])	# Only in SIRS mode
 										end
 									end
@@ -1166,12 +1173,27 @@ module diffusion_sim
 	end
 
 #   Exporting Objects
+#	The Richards and run summary names are not exported, so test scripts that
+#	include richards.jl and summarize.jl directly keep working; reach them as
+#	diffusion_sim.richards_model and diffusion_sim.run_summary.
     export sim_prep,
 		   sirdif,
 		   DurationSpec,
 		   FixedDuration,
 		   WeibullDuration,
-		   draw_duration
+		   draw_duration,
+		   run_sbi_batch,
+		   simulate_and_summarize,
+		   run_seeds,
+		   eligible_seed_nodes,
+		   draw_seed_nodes,
+		   read_seed_file,
+		   write_seed_file
+
+# 	Bring in the Richards fit, run summary, and batch files (26 October 2026)
+	include("richards.jl")     # defines module diffusion_sim.richards_model
+	include("summarize.jl")    # defines module diffusion_sim.run_summary
+	include("sbi_batch.jl")    # batch simulation for SBI, JSONL schema version 3
 
 # 	Bring in the CLI submodule
 	include("CLI.jl")   # defines module diffusion_sim.CLI

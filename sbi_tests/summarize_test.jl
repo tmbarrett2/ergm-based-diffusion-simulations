@@ -5,6 +5,8 @@
 #the t_peak field is removed, and fit_rmse is checked. The shape a now runs from
 #-1 to 10; frac_at_inflection is checked, and the curve diagnostics add the start
 #time, a smoothed incidence peak, and indicators of persistent infection.
+#Revised 26 October 2026: t_10, t_half, and t_90 are checked by hand, on the
+#path network, and in every pipeline run, and added to the curve diagnostics.
 
 #   Pulling-In diffustion_sim & Activating Local Environment
     cd("/workspace/ergm-based-diffusion-simulations")
@@ -190,10 +192,19 @@
 			checks["final size"] = s.final_size == 0.19
 			checks["duration"] = s.duration == 6 && s.extinguished
 
+		#	Timing of growth: beyond C(0) = 0.01 the growth is 0.18, so 10%, 50%,
+		#	and 90% (0.018, 0.09, 0.162) are first reached on days 1, 3, and 4
+			checks["t_10, t_half, t_90"] = s.t_10 == 1.0 && s.t_half == 3.0 && s.t_90 == 4.0
+
 		#	Persistent infection and a surge beyond the series
 			s2 = trajectory_summaries([0.01, 0.02, 0.03], [0.01, 0.02, 0.04]; surge_time=21)
 			checks["censored duration"] = s2.duration == 2 && !s2.extinguished
 			checks["surge beyond series is NaN"] = isnan(s2.infected_at_surge)
+			checks["timing with short growth"] = s2.t_10 == 1.0 && s2.t_half == 2.0 && s2.t_90 == 2.0
+
+		#	No growth beyond the seeds
+			s3 = trajectory_summaries([0.1, 0.1, 0.0], [0.1, 0.1, 0.1])
+			checks["timing is NaN without growth"] = isnan(s3.t_10) && isnan(s3.t_half) && isnan(s3.t_90)
 			checks["unequal lengths rejected"] = throws_error(() -> trajectory_summaries([0.1], [0.1, 0.2]), ArgumentError)
 
 		#	Assembling Result
@@ -265,6 +276,7 @@
 			checks["path: max slope 1/11"] = isapprox(s_p.max_slope, 1 / 11; atol=1e-15)
 			checks["path: final size 1"] = s_p.final_size == 1.0
 			checks["path: ends on day 12"] = s_p.duration == 12 && s_p.extinguished
+			checks["path: t_10, t_half, t_90 = 1, 5, 9"] = s_p.t_10 == 1.0 && s_p.t_half == 5.0 && s_p.t_90 == 9.0
 			checks["path: maxtime + 1 days"] = s_p.n_days == maxtime + 1
 			checks["path: class matches status"] = (s_p.status == :ok) == (s_p.class == :established)
 			checks["record has fit_rmse, no t_peak"] = haskey(s_p, :fit_rmse) && !haskey(s_p, :t_peak)
@@ -301,7 +313,9 @@
 			established run the inflection time t_i lies within [0, maxtime],
 			a lies within [-1, 10], frac_at_inflection lies within [0, 1),
 			and fit_rmse is finite; a non-starter or extinct run has
-			fit_rmse = NaN.
+			fit_rmse = NaN. Every run with growth has
+			0 ≤ t_10 ≤ t_half ≤ t_90 ≤ maxtime, and a non-starter has NaN
+			for all three.
 		"""
 
 		#	Network and eligible seeds
@@ -315,9 +329,9 @@
 		#	Pre-allocate results
 			results = DataFrame(run = Int[], rec_scale = Float64[], status = Symbol[], class = Symbol[],
 								final_size = Float64[], K = Float64[], t_i = Float64[], a = Float64[],
-								frac = Float64[], fit_rmse = Float64[], in_target = Any[],
-								days_ok = Bool[], c0_ok = Bool[], final_ok = Bool[], class_ok = Bool[],
-								curve_ok = Bool[])
+								frac = Float64[], fit_rmse = Float64[], t_half = Float64[], t_90 = Float64[],
+								in_target = Any[], days_ok = Bool[], c0_ok = Bool[], final_ok = Bool[],
+								class_ok = Bool[], curve_ok = Bool[], timing_ok = Bool[])
 
 		#	Iterate over runs
 			for r in 1:n_runs
@@ -362,13 +376,21 @@
 						true
 					end
 
+				#	Timing of growth ordered and within the horizon
+					timing_ok = if s.class == :nonstarter
+						isnan(s.t_10) && isnan(s.t_half) && isnan(s.t_90)
+					else
+						0.0 <= s.t_10 <= s.t_half <= s.t_90 <= maxtime
+					end
+
 				#	Record
 					push!(results, (r, rec_scale, s.status, s.class, s.final_size, s.K, s.t_i, s.a,
-									s.frac_at_inflection, s.fit_rmse, s.in_target, days_ok, c0_ok, final_ok, class_ok, curve_ok))
+									s.frac_at_inflection, s.fit_rmse, s.t_half, s.t_90, s.in_target,
+									days_ok, c0_ok, final_ok, class_ok, curve_ok, timing_ok))
 			end
 
 		#	Report
-			criteria = [:days_ok, :c0_ok, :final_ok, :class_ok, :curve_ok]
+			criteria = [:days_ok, :c0_ok, :final_ok, :class_ok, :curve_ok, :timing_ok]
 			all_passed = all(all(results[!, c]) for c in criteria)
 			if verbose
 				println("=" ^ 60)
@@ -399,6 +421,14 @@
 							"a < 0 in $(count(est.a .< 0.0)) / $(nrow(est)), a = -1 in $(count(est.a .<= -1.0 + 1.0e-6))")
 					println("  Established runs: median a = $(round(median(est.a), digits=3)), " *
 							"median frac_at_inflection = $(round(median(est.frac), digits=3))")
+					println("  Established runs: median t_half = $(round(median(est.t_half), digits=1)), " *
+							"median t_90 - t_half = $(round(median(est.t_90 .- est.t_half), digits=1))")
+					lim = est[est.a .<= -0.9, :]
+					if nrow(lim) > 0
+						println("  Runs with a <= -0.9 ($(nrow(lim))): median t_i = $(round(median(lim.t_i), digits=1)), " *
+								"median t_half = $(round(median(lim.t_half), digits=1)), " *
+								"median t_90 - t_half = $(round(median(lim.t_90 .- lim.t_half), digits=1))")
+					end
 				end
 				println("RESULT: $(all_passed ? "ALL RUNS CONSISTENT" : "SOME RUNS INCONSISTENT")")
 			end
@@ -439,7 +469,8 @@
 #	obs_inc_peak_ma7 is the same peak after a 7-day centered moving average;
 #	obs_peak_day is the day of peak prevalence, which follows the incidence peak;
 #	t_start is the fitted start, richards_start (-Inf for a ≥ 0);
-#	extinguished and late_prev (mean prevalence on days 150 to 200) flag persistent infection
+#	extinguished and late_prev (mean prevalence on days 150 to 200) flag persistent infection;
+#	t_10, t_half, and t_90 are the days on which 10%, 50%, and 90% of the growth is reached
 	alst = network_data.alst; vlst = network_data.vlst; n = size(alst, 1)
 	eligible = findall(i -> alst[i, 2] > 0, 1:n); ids = alst[:, 1]
 	rows = []
@@ -455,11 +486,13 @@
 		f = fit_richards(t, C; C0=C[1])
 		inc = diff(C); ma7 = [sum(inc[k-3:k+3]) / 7 for k in 4:length(inc)-3]
 		t_start = f.fit_ok ? richards_start(f.r_growth, f.t_i, f.a) : NaN
+		tr = trajectory_summaries(Float64.(daily.n_infected) ./ n, C)
 		push!(rows, (run=r, status=f.status, K=f.K, r=f.r_growth, t_i=f.t_i, a=f.a,
 					frac=f.frac_at_inflection, t_start=t_start, fit_rmse=f.fit_rmse,
 					obs_inc_peak=argmax(inc) - 0.5, obs_inc_peak_ma7=argmax(ma7) + 2.5,
 					obs_peak_day=argmax(daily.n_infected) - 1,
 					extinguished=any(daily.n_infected[2:end] .== 0),
-					late_prev=mean(daily.n_infected[151:201]) / n))
+					late_prev=mean(daily.n_infected[151:201]) / n,
+					t_10=tr.t_10, t_half=tr.t_half, t_90=tr.t_90))
 	end
 	show(DataFrame(rows); allrows=true)

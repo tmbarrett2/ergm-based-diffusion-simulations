@@ -5,6 +5,10 @@
 #so the separate t_peak field is removed; fit_rmse is added to the run summary.
 #The shape a now runs from -1 to 10, and frac_at_inflection, the share of the
 #final size reached at t_i, is added as the shape summary.
+#Revised 26 October 2026: t_10, t_half, and t_90, the days on which the run
+#reaches 10%, 50%, and 90% of its growth beyond the seeds, are taken from the
+#data, because the fitted t_i marks the takeoff rather than the peak when a
+#reaches its lower limit of -1.
 
 module run_summary
 
@@ -98,6 +102,33 @@ using ..richards_model
 #	TRAJECTORY SUMMARIES
 # ============================================================
 
+#	Helper Function for trajectory_summaries: first day a share of growth is reached
+	function growth_crossing_day(cum_t::Vector{Float64}, share::Float64)::Float64
+		"""
+		Args:
+			cum_t::Vector{Float64}: proportion ever infected on days 0, 1, ..., T
+			share::Float64: share of the growth beyond day 0, in (0, 1]
+		Returns:
+			Float64: first day d with cum_t[d] - cum_t[0] ≥ share × (cum_t[T] - cum_t[0]),
+					 or NaN when there is no growth (a non-starter)
+		Notes:
+			Growth is measured beyond day 0, so the seeds do not count,
+			matching Option A in the Richards fit. Because cum_t is
+			non-decreasing and the final value meets every share, a day is
+			always found when there is growth.
+		"""
+
+		#	No growth beyond the seeds
+			growth = cum_t[end] - cum_t[1]
+			if growth <= 0.0
+				return NaN
+			end
+
+		#	First day at or above the share of growth
+			idx = findfirst(c -> c - cum_t[1] >= share * growth, cum_t)
+			return Float64(idx - 1)
+	end
+
 #	Trajectory Summaries from a Daily Series
 	function trajectory_summaries(infected_t::Vector{Float64}, cum_t::Vector{Float64};
 								  surge_time::Int=21)
@@ -108,7 +139,7 @@ using ..richards_model
 			surge_time::Int: day of the early-infection measurement (default = 21)
 		Returns:
 			NamedTuple: peak_infected, peak_day, infected_at_surge, max_slope,
-						final_size, duration, extinguished
+						final_size, duration, extinguished, t_10, t_half, t_90
 		Notes:
 			peak_day is the first day of the peak. infected_at_surge is NaN if
 			surge_time lies beyond the series. max_slope is the largest
@@ -116,6 +147,13 @@ using ..richards_model
 			day after day 0 on which no one is infected; if infections persist
 			through the horizon, duration is the last day and extinguished is
 			false (the duration is censored).
+			t_10, t_half, and t_90 are the first days on which the run reaches
+			10%, 50%, and 90% of its growth beyond the seeds (26 October 2026).
+			They come from the data, not the Richards fit. For runs whose fit
+			reaches a = -1, the fitted t_i marks the takeoff rather than the
+			peak, and these days keep a consistent meaning in every run.
+			t_90 - t_half measures the length of the tail. All three are NaN
+			for a non-starter.
 		"""
 
 		#	Validation
@@ -134,9 +172,15 @@ using ..richards_model
 			extinguished = end_idx !== nothing
 			duration = extinguished ? end_idx : length(infected_t) - 1
 
+		#	Timing of growth: 10%, 50%, and 90% of the growth beyond the seeds
+			t_10 = growth_crossing_day(cum_t, 0.1)
+			t_half = growth_crossing_day(cum_t, 0.5)
+			t_90 = growth_crossing_day(cum_t, 0.9)
+
 		#	Assembling Result
 			return (peak_infected=peak_infected, peak_day=peak_idx - 1, infected_at_surge=infected_at_surge,
-					max_slope=max_slope, final_size=cum_t[end], duration=duration, extinguished=extinguished)
+					max_slope=max_slope, final_size=cum_t[end], duration=duration, extinguished=extinguished,
+					t_10=t_10, t_half=t_half, t_90=t_90)
 	end
 	@doc raw"""
 	**Description**
@@ -150,6 +194,9 @@ using ..richards_model
 	- `cum_t::Vector{Float64}`: Proportion ever infected on days 0 to T.
 	- `surge_time::Int`: Day of the early-infection measurement (default 21).
 
+	**Details**
+	The three timing days are taken from the data rather than the Richards fit. When the fit reaches its lower shape limit, ``a = -1``, the fitted ``t_i`` falls on the day of takeoff rather than the peak of incidence, because the monomolecular curve jumps to its largest incidence at its start. In simulated village epidemics this happens for runs with an abrupt takeoff, sometimes after a delay, followed by a long tail with secondary waves. ``t_{\text{half}}`` keeps the same meaning in every run, and ``t_{90} - t_{\text{half}}`` measures the length of the tail.
+
 	**Value**
 	A `NamedTuple`:
 	- `peak_infected`: Largest proportion simultaneously infected.
@@ -159,6 +206,7 @@ using ..richards_model
 	- `final_size`: Proportion ever infected on the last day, C(T).
 	- `duration`: First day after day 0 with no one infected, or T if infection persists.
 	- `extinguished`: `false` when infection persists through day T, so `duration` is censored.
+	- `t_10`, `t_half`, `t_90`: First days on which the run reaches 10%, 50%, and 90% of its growth beyond the seeds (`NaN` for a non-starter).
 
 	**See Also**
 	`expand_daily_log`, `summarize_run`
@@ -246,7 +294,7 @@ using ..richards_model
 					peak_infected=traj.peak_infected, peak_day=traj.peak_day,
 					infected_at_surge=traj.infected_at_surge, max_slope=traj.max_slope,
 					final_size=traj.final_size, duration=traj.duration, extinguished=traj.extinguished,
-					C0=C0, fit_ok=fit.fit_ok, extinct=fit.extinct, viable=fit.viable,
+					t_10=traj.t_10, t_half=traj.t_half, t_90=traj.t_90, C0=C0, fit_ok=fit.fit_ok, extinct=fit.extinct, viable=fit.viable,
 					status=fit.status, class=target.class, in_target=target.in_target,
 					peak_ok=target.peak, surge_ok=target.surge, slope_ok=target.slope,
 					prevalence_ok=target.prevalence, final_size_ok=target.final_size,
@@ -275,13 +323,13 @@ using ..richards_model
 	1. `expand_daily_log` fills the days after extinction.
 	2. ``C_0`` is read from day 0, which `sirdif` records as the number of distinct seeds divided by ``N``.
 	3. `fit_richards` fits ``C(t) - C_0`` and classifies the run (`:ok`, `:nonstarter`, `:extinct`, or a failure status). The fitted `t_i` is the inflection time, the day of peak incidence; with `K`, `r_growth`, and `a` it reproduces the fitted curve. The shape `a` lies in ``[-1, 10]``, and `frac_at_inflection` gives the share of `K` reached at `t_i`.
-	4. `trajectory_summaries` computes peak, early-infection size, slope, final size, and duration from ``I(t) = n_{\text{infected}}(t)/N``.
+	4. `trajectory_summaries` computes peak, early-infection size, slope, final size, duration, and the days on which 10%, 50%, and 90% of the growth beyond the seeds is reached, from ``I(t) = n_{\text{infected}}(t)/N``.
 	5. `evaluate_target` assigns the class and `in_target` under `extinct_policy`.
 
 	Every analysis is conditioned on at least one transmission, so a non-starter has `viable = false` and `in_target = nothing`.
 
 	**Value**
-	A `NamedTuple` with the fitted parameters (`K`, `r_growth`, `t_i`, `a`), the shape summary (`frac_at_inflection`), the fit's root-mean-square residual (`fit_rmse`), peak quantities (`peak_incidence`, `peak_prevalence`), trajectory summaries (`peak_infected`, `peak_day`, `infected_at_surge`, `max_slope`, `final_size`, `duration`, `extinguished`), `C0`, the flags (`fit_ok`, `extinct`, `viable`, `status`, `class`), the target result (`in_target` and each constraint), and `n_days`.
+	A `NamedTuple` with the fitted parameters (`K`, `r_growth`, `t_i`, `a`), the shape summary (`frac_at_inflection`), the fit's root-mean-square residual (`fit_rmse`), peak quantities (`peak_incidence`, `peak_prevalence`), trajectory summaries (`peak_infected`, `peak_day`, `infected_at_surge`, `max_slope`, `final_size`, `duration`, `extinguished`), the timing of growth (`t_10`, `t_half`, `t_90`), `C0`, the flags (`fit_ok`, `extinct`, `viable`, `status`, `class`), the target result (`in_target` and each constraint), and `n_days`.
 
 	**See Also**
 	`expand_daily_log`, `trajectory_summaries`, `fit_richards`, `evaluate_target`
