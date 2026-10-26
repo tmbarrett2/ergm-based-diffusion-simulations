@@ -1,6 +1,9 @@
-#Batch Simulation Tests: Seeds, UT-1.4, Replay, Seed-File Mode, and UT-1.8
+#Batch Simulation Tests: Seeds, UT-1.4, Replay, Seed-File Mode, UT-1.8, and SAS Network
 #Jonathan H. Morgan, Ph.D.
 #26 October 2026
+#Revised 26 October 2026: outputs kept in sbi_tests/output; the SAS-transformed
+#network option is tested. Seed components: weak components and eligible seeds on
+#a hand-built network, and a batch on net_58 with seeds in the largest component.
 #Run with several threads so that UT-1.8 compares serial and threaded batches:
 #	julia -t 8 sbi_test.jl
 
@@ -108,9 +111,9 @@
 			checks["run and node seeds differ"] = all(s -> s.run_seed != s.node_seed, seeds)
 			checks["master seed changes the run seed"] = run_seeds(43, 7, 1).run_seed != s1.run_seed
 
-		#	Eligible nodes have a tie to another node
+		#	Eligible nodes have a tie to another node (any component)
 			alst = network_data.alst
-			eligible = eligible_seed_nodes(alst)
+			eligible = eligible_seed_nodes(alst; component=:any)
 			row_of = Dict(alst[i, 1] => i for i in 1:size(alst, 1))
 			isolated = count(i -> !any(>(0), alst[i, 2:end]), 1:size(alst, 1))
 			checks["every eligible node has a tie"] = all(id -> any(nbr -> nbr > 0 && nbr != id, alst[row_of[id], 2:end]), eligible)
@@ -360,6 +363,128 @@
 			return report_checks("UT-1.8: Parallel Reproducibility ($(n_runs) runs)", checks)
 	end
 
+#	SAS-Transformed Network Option
+	function test_sas_network(graphml_path::String, params_file::String, work_dir::String)
+		"""
+		Args:
+			graphml_path::String: network file
+			params_file::String: the 20-draw test batch
+			work_dir::String: directory for the outputs
+		Returns:
+			Bool: true if every check passed
+		Notes:
+			Runs the batch with sas_transformation = true. The manifest must
+			record the choice, n_nodes must match the transformed network,
+			every seed node must be eligible in it, and a record must replay
+			exactly when the network is loaded the same way. The run classes
+			are reported for comparison with the raw network.
+		"""
+
+		#	Run the batch on the transformed network
+			out_file = joinpath(work_dir, "ut14_sas.jsonl")
+			res = run_sbi_batch(graphml_path, params_file, out_file; village="WeakCore1_3.2_2",
+								sas_transformation=true, region=TargetRegion(K_max=1.0), master_seed=42)
+			out = read_records(out_file)
+			net_sas = sim_prep(graphml_path; sas_transformation=true)
+			eligible = Set(eligible_seed_nodes(net_sas.alst))
+			m = JSON3.read(read(res.manifest_file, String))
+			checks = Dict{String, Bool}()
+
+		#	Manifest, network size, and seeds
+			checks["manifest records sas_transformation"] = m[:sas_transformation] === true
+			checks["n_nodes matches the transformed network"] = all(rec -> rec[:meta][:n_nodes] == size(net_sas.alst, 1), out.records)
+			checks["seed nodes eligible in the transformed network"] = all(rec -> all(in(eligible), rec[:meta][:seed_nodes]), out.records)
+
+		#	Replay the first record on the transformed network
+			draws = diffusion_sim.read_draws(params_file)
+			meta = out.records[1][:meta]
+			seed_nodes = Int.(collect(meta[:seed_nodes]))
+			summary = simulate_and_summarize(net_sas.alst, net_sas.vlst, seed_nodes, draws[1].theta, 200,
+											 TargetRegion(K_max=1.0); rng=Xoshiro(meta[:run_seed]))
+			rebuilt = (village = meta[:village], draw_id = meta[:draw_id], replicate = meta[:replicate],
+					   run_seed = meta[:run_seed], seed_nodes = seed_nodes, n_nodes = meta[:n_nodes],
+					   schema_version = meta[:schema_version])
+			line = JSON3.write(diffusion_sim.build_record(draws[1].theta, summary, rebuilt))
+			checks["record replays on the transformed network"] = line == out.lines[1]
+
+		#	Report the classes
+			println("  Classes (SAS network): ", join(["$(k)=$(v)" for (k, v) in sort(collect(res.class_counts))], ", "))
+
+		#	Assembling Result
+			return report_checks("SAS-Transformed Network Option", checks)
+	end
+
+#	Seed Components: Weak Components, Eligible Seeds, and a Village Batch
+	function test_seed_components(graphml_path::String, village_path::String, params_file::String, work_dir::String)
+		"""
+		Args:
+			graphml_path::String: the connected test network (WeakCore1_3.2_2)
+			village_path::String: a synthetic village with many components (net_58)
+			params_file::String: the 20-draw test batch
+			work_dir::String: directory for the outputs
+		Returns:
+			Bool: true if every check passed
+		Notes:
+			The hand-built network has IDs 11 to 18: {11, 12, 13, 14, 15} joined
+			by ties in both directions and the one-directional tie 14 -> 11, with
+			15 named by 11 but naming nobody; {16, 17}; and 18, whose only tie is
+			to itself. On the connected test network the two rules must give the
+			same eligible nodes in the same order, so earlier batches there are
+			unchanged by the new default.
+		"""
+
+		#	Hand-built network: components and eligible nodes
+			alst = [11 12 15; 12 13 0; 13 11 0; 14 11 0; 15 0 0; 16 17 0; 17 16 0; 18 18 0]
+			comps = diffusion_sim.weak_components(alst)
+			checks = Dict{String, Bool}()
+			checks["toy: 3 weak components"] = length(comps.sizes) == 3
+			checks["toy: largest has 5 nodes, row 1's set"] = comps.sizes[comps.largest] == 5 && comps.label[1] == comps.largest
+			checks["toy: one-directional tie joins 14"] = comps.label[4] == comps.largest
+			checks["toy: self-tie leaves 18 alone"] = comps.sizes[comps.label[8]] == 1
+			checks["toy: largest eligible = [11, 12, 13, 14]"] = eligible_seed_nodes(alst) == [11, 12, 13, 14]
+			checks["toy: any eligible = [11, 12, 13, 14, 16, 17]"] = eligible_seed_nodes(alst; component=:any) == [11, 12, 13, 14, 16, 17]
+			checks["toy: unknown component rejected"] = throws_error(() -> eligible_seed_nodes(alst; component=:all), ArgumentError)
+
+		#	Equal-sized components: the one with the earliest row is the largest
+			tied = [21 22 0; 22 21 0; 23 24 0; 24 23 0]
+			checks["toy: size tie goes to the earliest row"] = eligible_seed_nodes(tied) == [21, 22]
+
+		#	Connected test network: both rules agree, raw and SAS-transformed
+			for sas in (false, true)
+				net = sim_prep(graphml_path; sas_transformation=sas)
+				checks["connected network (sas=$(sas)): largest == any"] =
+					eligible_seed_nodes(net.alst) == eligible_seed_nodes(net.alst; component=:any)
+			end
+
+		#	Village batch with seeds in the largest component
+			out_file = joinpath(work_dir, "net_58_largest.jsonl")
+			res = run_sbi_batch(village_path, params_file, out_file; village="net_58", sas_transformation=true,
+								region=TargetRegion(K_max=1.0), master_seed=42)
+			out = read_records(out_file)
+			m = JSON3.read(read(res.manifest_file, String))
+			net = sim_prep(village_path; sas_transformation=true)
+			vc = diffusion_sim.weak_components(net.alst)
+			row_of = Dict(net.alst[i, 1] => i for i in 1:size(net.alst, 1))
+			in_largest = id -> vc.label[row_of[id]] == vc.largest
+			checks["net_58: manifest seed_component = largest"] = m[:seed_component] == "largest"
+			checks["net_58: manifest component counts"] = m[:n_components] == length(vc.sizes) &&
+														  m[:largest_component] == vc.sizes[vc.largest]
+			checks["net_58: manifest n_eligible_seeds"] = m[:n_eligible_seeds] == length(eligible_seed_nodes(net.alst))
+			checks["net_58: every seed in the largest component"] = all(rec -> all(in_largest, rec[:meta][:seed_nodes]), out.records)
+
+		#	The same batch with seeds from any component, for comparison
+			res_any = run_sbi_batch(village_path, params_file, joinpath(work_dir, "net_58_any.jsonl"); village="net_58",
+									sas_transformation=true, seed_component=:any, region=TargetRegion(K_max=1.0),
+									master_seed=42)
+			println("  net_58: $(m[:n_components]) components, largest $(m[:largest_component]) of $(m[:n_nodes]) nodes, ",
+					"$(m[:n_eligible_seeds]) eligible seeds")
+			println("  Classes, largest: ", join(["$(k)=$(v)" for (k, v) in sort(collect(res.class_counts))], ", "))
+			println("  Classes, any:     ", join(["$(k)=$(v)" for (k, v) in sort(collect(res_any.class_counts))], ", "))
+
+		#	Assembling Result
+			return report_checks("Seed Components: Weak Components and Eligible Seeds", checks)
+	end
+
 #############
 #   TESTS   #
 #############
@@ -367,6 +492,7 @@
 #	Paths (EC2 test data) and a scratch directory for outputs
 	graphml_path = "/workspace/ergm_data/sim_test_data/WeakCore1_3.2_2.graphml"
 	params_file = "/workspace/ergm-based-diffusion-simulations/sbi_tests/params_batch_ut14.json"
+	village_path = "/workspace/ergm_data/sim_test_data/synthetic_village_m_graphml/net_58.graphml"
 	work_dir = mkpath("/workspace/ergm-based-diffusion-simulations/sbi_tests/output")
 	network_data = sim_prep(graphml_path)
 
@@ -379,6 +505,8 @@
 	replay_passed = test_replay(network_data, params_file, ut14.out_file)
 	file_mode_passed = test_seed_file_mode(graphml_path, params_file, ut14.out_file, work_dir)
 	ut18_passed = test_ut18(graphml_path, params_file, work_dir)
+	sas_passed = test_sas_network(graphml_path, params_file, work_dir)
+	components_passed = test_seed_components(graphml_path, village_path, params_file, work_dir)
 
 #	Summary
 	println("=" ^ 60)
@@ -389,4 +517,6 @@
 	println("  Replay from stored seeds:  $(replay_passed ? "PASS" : "FAIL")")
 	println("  Seed-file mode:            $(file_mode_passed ? "PASS" : "FAIL")")
 	println("  UT-1.8 parallel:           $(ut18_passed ? "PASS" : "FAIL")")
+	println("  SAS network option:        $(sas_passed ? "PASS" : "FAIL")")
+	println("  Seed components:           $(components_passed ? "PASS" : "FAIL")")
 	println("  Outputs in: $(work_dir)")

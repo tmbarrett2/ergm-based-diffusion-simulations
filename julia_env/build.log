@@ -16,6 +16,32 @@ Status `/workspace/ergm-based-diffusion-simulations/julia_env/Project.toml`
 Info Packages marked with ⌃ have new versions available and may be upgradable.
   No Changes to `/workspace/ergm-based-diffusion-simulations/julia_env/Project.toml`
   No Changes to `/workspace/ergm-based-diffusion-simulations/julia_env/Manifest.toml`
+Precompiling project...
+    757.5 ms  ✓ CommonSolve
+    895.7 ms  ✓ Rmath_jll
+    958.5 ms  ✓ XML2_jll
+   1498.0 ms  ✓ ADTypes
+   1272.6 ms  ✓ Rmath
+    843.0 ms  ✓ ADTypes → ADTypesConstructionBaseExt
+   1395.5 ms  ✓ EzXML
+   1782.1 ms  ✓ DifferentiationInterface
+   3383.5 ms  ✓ SpecialFunctions
+    878.1 ms  ✓ DifferentiationInterface → DifferentiationInterfaceFiniteDiffExt
+   1032.4 ms  ✓ DifferentiationInterface → DifferentiationInterfaceSparseArraysExt
+   3986.6 ms  ✓ Roots
+   1637.2 ms  ✓ StatsFuns
+    979.6 ms  ✓ NLSolversBase
+    548.3 ms  ✓ StatsFuns → StatsFunsInverseFunctionsExt
+   4132.2 ms  ✓ ForwardDiff
+    666.9 ms  ✓ Roots → RootsForwardDiffExt
+    980.6 ms  ✓ DifferentiationInterface → DifferentiationInterfaceForwardDiffExt
+   5236.5 ms  ✓ Distributions
+   1528.3 ms  ✓ LsqFit
+  17619.8 ms  ✓ CSV
+  29156.0 ms  ✓ PrettyTables
+  43189.1 ms  ✓ DataFrames
+   3726.4 ms  ✓ diffusion_sim
+  24 dependencies successfully precompiled in 77 seconds. 120 already precompiled.
 [ Info: Verifying module & entrypoint…
 [ Info: Checking precompile script at /workspace/ergm-based-diffusion-simulations/julia_env/precompile_exec.jl
 PackageCompiler: bundled libraries:
@@ -80,183 +106,183 @@ PackageCompiler: bundled artifacts:
 ┌ Debug: instantiating project at "/workspace/ergm-based-diffusion-simulations/julia_env"
 └ @ PackageCompiler ~/.julia/packages/PackageCompiler/FtDNu/src/PackageCompiler.jl:582
 - PackageCompiler: creating compiler .ji image (incremental=false)
-┌ Debug: running `/opt/julia/bin/julia --color=auto --startup-file=no --pkgimages=no --cpu-target generic --output-ji /tmp/jl_auoeeo/corecompiler.ji /opt/julia/share/julia/base/compiler/compiler.jl`
+┌ Debug: running `/opt/julia/bin/julia --color=auto --startup-file=no --pkgimages=no --cpu-target generic --output-ji /tmp/jl_0FztPE/corecompiler.ji /opt/julia/share/julia/base/compiler/compiler.jl`
 └ @ PackageCompiler ~/.julia/packages/PackageCompiler/FtDNu/src/PackageCompiler.jl:254
 - PackageCompiler: compiling fresh sysimage (incremental=false)
-┌ Debug: running setenv(`/opt/julia/bin/julia --color=auto --startup-file=no --pkgimages=no --cpu-target generic --sysimage=/tmp/jl_auoeeo/corecompiler.ji --output-o=/tmp/jl_auoeeo/sys-o.a /tmp/jl_auoeeo/sysimage_packagecompiler_9eb5cf94-d16e-11f1-3e2b-6dd5ab356023.jl`,["PYTHON=/usr/bin/python3", "PATH=/root/.local/bin:/root/.vscode-server/data/User/globalStorage/github.copilot-chat/debugCommand:/root/.vscode-server/data/User/globalStorage/github.copilot-chat/copilotCli:/root/.vscode-server/bin/6d62b1d5dace93a33b3a6d3eca1317bd5e15bcb1/bin/remote-cli:/root/.local/bin:/opt/sbi-env/bin:/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "NV_LIBNCCL_PACKAGE_VERSION=2.20.3-1", "NV_LIBCUBLAS_PACKAGE_NAME=libcublas-12-3", "NVIDIA_DRIVER_CAPABILITIES=compute,utility", "LD_LIBRARY_PATH=/usr/local/nvidia/lib:/usr/local/nvidia/lib64", "LC_ALL=en_US.UTF-8", "GIT_ASKPASS=/root/.vscode-server/bin/6d62b1d5dace93a33b3a6d3eca1317bd5e15bcb1/extensions/git/dist/askpass.sh", "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus", "VSCODE_NONCE=465fcc26-bf89-4864-8ad8-b76bf2bc9b17", "NVIDIA_VISIBLE_DEVICES=all", "BROWSER=/root/.vscode-server/bin/6d62b1d5dace93a33b3a6d3eca1317bd5e15bcb1/bin/helpers/browser.sh", "LANG=en_US.UTF-8", "SHLVL=1", "EC2_IP=52.70.230.30", "UBUNTU_CODENAME=jammy", "NV_CUDA_LIB_VERSION=12.3.2-1", "NCCL_VERSION=2.20.3-1", "OLDPWD=/workspace/ergm-based-diffusion-simulations", "NV_LIBCUSPARSE_VERSION=12.2.0.103-1", "REMOTE_CONTAINERS=true", "_=/usr/local/sbin/julia", "OPENBLAS_DEFAULT_NUM_THREADS=1", "NV_CUDA_COMPAT_PACKAGE=cuda-compat-12-3", "LESSCLOSE=/usr/bin/lesspipe %s %s", "NVIDIA_PRODUCT_NAME=CUDA", "JULIA_PKG_PRECOMPILE_AUTO=0", "TERM_PROGRAM_VERSION=1.142.0", "NV_CUDA_CUDART_VERSION=12.3.101-1", "CUDA_VERSION=12.3.2", "NVARCH=x86_64", "NV_LIBCUBLAS_PACKAGE=libcublas-12-3=12.3.4.1-1", "PWD=/workspace/ergm-based-diffusion-simulations/julia_env", "NV_CUDNN_PACKAGE_NAME=libcudnn9-cuda-12", "DISPLAY=:100", "KERAS_BACKEND=torch", "TERM_PROGRAM=vscode", "VSCODE_GIT_ASKPASS_NODE=/root/.vscode-server/bin/6d62b1d5dace93a33b3a6d3eca1317bd5e15bcb1/node", "LESSOPEN=| /usr/bin/lesspipe %s", "COPILOT_DEBUG_NONCE=475b7d6aab0d39b9250b9b62470893e8", "SHELL=/bin/bash", "VSCODE_GIT_ASKPASS_MAIN=/root/.vscode-server/bin/6d62b1d5dace93a33b3a6d3eca1317bd5e15bcb1/extensions/git/dist/askpass-main.js", "NV_LIBNPP_PACKAGE=libnpp-12-3=12.2.3.2-1", "NV_LIBNPP_VERSION=12.2.3.2-1", "NVIDIA_REQUIRE_CUDA=cuda>=12.3 brand=tesla,driver>=470,driver<471 brand=unknown,driver>=470,driver<471 brand=nvidia,driver>=470,driver<471 brand=nvidiartx,driver>=470,driver<471 brand=geforce,driver>=470,driver<471 brand=geforcertx,driver>=470,driver<471 brand=quadro,driver>=470,driver<471 brand=quadrortx,driver>=470,driver<471 brand=titan,driver>=470,driver<471 brand=titanrtx,driver>=470,driver<471 brand=tesla,driver>=525,driver<526 brand=unknown,driver>=525,driver<526 brand=nvidia,driver>=525,driver<526 brand=nvidiartx,driver>=525,driver<526 brand=geforce,driver>=525,driver<526 brand=geforcertx,driver>=525,driver<526 brand=quadro,driver>=525,driver<526 brand=quadrortx,driver>=525,driver<526 brand=titan,driver>=525,driver<526 brand=titanrtx,driver>=525,driver<526 brand=tesla,driver>=535,driver<536 brand=unknown,driver>=535,driver<536 brand=nvidia,driver>=535,driver<536 brand=nvidiartx,driver>=535,driver<536 brand=geforce,driver>=535,driver<536 brand=geforcertx,driver>=535,driver<536 brand=quadro,driver>=535,driver<536 brand=quadrortx,driver>=535,driver<536 brand=titan,driver>=535,driver<536 brand=titanrtx,driver>=535,driver<536", "VSCODE_IPC_HOOK_CLI=/tmp/vscode-ipc-c9254d7f-f8df-436f-9b32-6c7cae6fe324.sock", "VSCODE_GIT_ASKPASS_EXTRA_ARGS=", "VSCODE_GIT_IPC_HANDLE=/tmp/vscode-git-adccb2f869.sock", "NV_LIBNCCL_PACKAGE=libnccl2=2.20.3-1+cuda12.3", "NV_CUDNN_PACKAGE=libcudnn9-cuda-12=9.0.0.312-1", "CURL=/usr/bin/curl", "NV_NVTX_VERSION=12.3.101-1", "CONTAINER_NAME=collaborative-env", "NV_LIBCUBLAS_VERSION=12.3.4.1-1", "DEBIAN_FRONTEND=noninteractive", "PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/local/lib/pkgconfig:/usr/share/pkgconfig", "JULIA_LOAD_PATH=@stdlib", "JULIA_CMDSTAN_HOME=/opt/cmdstan", "REMOTE_CONTAINERS_SOCKETS=[\"/root/.gnupg/S.gpg-agent\"]", "NV_CUDNN_VERSION=9.0.0.312", "NV_LIBNCCL_PACKAGE_NAME=libnccl2", "REMOTE_CONTAINERS_IPC=/tmp/vscode-remote-containers-ipc-4eeedda8-7cd6-45ba-8a2d-49a37537b4b5.sock", "JULIA_DEBUG=PackageCompiler", "HOME=/root", "TERM=xterm-256color", "LS_COLORS=rs=0:di=01;34:ln=01;36:mh=00:pi=40;33:so=01;35:do=01;35:bd=40;33;01:cd=40;33;01:or=40;31;01:mi=00:su=37;41:sg=30;43:ca=30;41:tw=30;42:ow=34;42:st=37;44:ex=01;32:*.tar=01;31:*.tgz=01;31:*.arc=01;31:*.arj=01;31:*.taz=01;31:*.lha=01;31:*.lz4=01;31:*.lzh=01;31:*.lzma=01;31:*.tlz=01;31:*.txz=01;31:*.tzo=01;31:*.t7z=01;31:*.zip=01;31:*.z=01;31:*.dz=01;31:*.gz=01;31:*.lrz=01;31:*.lz=01;31:*.lzo=01;31:*.xz=01;31:*.zst=01;31:*.tzst=01;31:*.bz2=01;31:*.bz=01;31:*.tbz=01;31:*.tbz2=01;31:*.tz=01;31:*.deb=01;31:*.rpm=01;31:*.jar=01;31:*.war=01;31:*.ear=01;31:*.sar=01;31:*.rar=01;31:*.alz=01;31:*.ace=01;31:*.zoo=01;31:*.cpio=01;31:*.7z=01;31:*.rz=01;31:*.cab=01;31:*.wim=01;31:*.swm=01;31:*.dwm=01;31:*.esd=01;31:*.jpg=01;35:*.jpeg=01;35:*.mjpg=01;35:*.mjpeg=01;35:*.gif=01;35:*.bmp=01;35:*.pbm=01;35:*.pgm=01;35:*.ppm=01;35:*.tga=01;35:*.xbm=01;35:*.xpm=01;35:*.tif=01;35:*.tiff=01;35:*.png=01;35:*.svg=01;35:*.svgz=01;35:*.mng=01;35:*.pcx=01;35:*.mov=01;35:*.mpg=01;35:*.mpeg=01;35:*.m2v=01;35:*.mkv=01;35:*.webm=01;35:*.webp=01;35:*.ogm=01;35:*.mp4=01;35:*.m4v=01;35:*.mp4v=01;35:*.vob=01;35:*.qt=01;35:*.nuv=01;35:*.wmv=01;35:*.asf=01;35:*.rm=01;35:*.rmvb=01;35:*.flc=01;35:*.avi=01;35:*.fli=01;35:*.flv=01;35:*.gl=01;35:*.dl=01;35:*.xcf=01;35:*.xwd=01;35:*.yuv=01;35:*.cgm=01;35:*.emf=01;35:*.ogv=01;35:*.ogx=01;35:*.aac=00;36:*.au=00;36:*.flac=00;36:*.m4a=00;36:*.mid=00;36:*.midi=00;36:*.mka=00;36:*.mp3=00;36:*.mpc=00;36:*.ogg=00;36:*.ra=00;36:*.wav=00;36:*.oga=00;36:*.opus=00;36:*.spx=00;36:*.xspf=00;36:", "COLORTERM=truecolor", "HOSTNAME=9deda958be2a", "OPENBLAS_MAIN_FREE=1"])
+┌ Debug: running setenv(`/opt/julia/bin/julia --color=auto --startup-file=no --pkgimages=no --cpu-target generic --sysimage=/tmp/jl_0FztPE/corecompiler.ji --output-o=/tmp/jl_0FztPE/sys-o.a /tmp/jl_0FztPE/sysimage_packagecompiler_2e45af82-d17a-11f1-33cf-051b735645fc.jl`,["PYTHON=/usr/bin/python3", "PATH=/root/.local/bin:/root/.vscode-server/data/User/globalStorage/github.copilot-chat/debugCommand:/root/.vscode-server/data/User/globalStorage/github.copilot-chat/copilotCli:/root/.vscode-server/bin/6d62b1d5dace93a33b3a6d3eca1317bd5e15bcb1/bin/remote-cli:/root/.local/bin:/opt/sbi-env/bin:/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "NV_LIBNCCL_PACKAGE_VERSION=2.20.3-1", "NV_LIBCUBLAS_PACKAGE_NAME=libcublas-12-3", "NVIDIA_DRIVER_CAPABILITIES=compute,utility", "LD_LIBRARY_PATH=/usr/local/nvidia/lib:/usr/local/nvidia/lib64", "LC_ALL=en_US.UTF-8", "GIT_ASKPASS=/root/.vscode-server/bin/6d62b1d5dace93a33b3a6d3eca1317bd5e15bcb1/extensions/git/dist/askpass.sh", "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus", "VSCODE_NONCE=465fcc26-bf89-4864-8ad8-b76bf2bc9b17", "NVIDIA_VISIBLE_DEVICES=all", "BROWSER=/root/.vscode-server/bin/6d62b1d5dace93a33b3a6d3eca1317bd5e15bcb1/bin/helpers/browser.sh", "LANG=en_US.UTF-8", "SHLVL=1", "EC2_IP=52.70.230.30", "UBUNTU_CODENAME=jammy", "NV_CUDA_LIB_VERSION=12.3.2-1", "NCCL_VERSION=2.20.3-1", "OLDPWD=/workspace/ergm-based-diffusion-simulations", "NV_LIBCUSPARSE_VERSION=12.2.0.103-1", "REMOTE_CONTAINERS=true", "_=/usr/local/sbin/julia", "OPENBLAS_DEFAULT_NUM_THREADS=1", "NV_CUDA_COMPAT_PACKAGE=cuda-compat-12-3", "LESSCLOSE=/usr/bin/lesspipe %s %s", "NVIDIA_PRODUCT_NAME=CUDA", "JULIA_PKG_PRECOMPILE_AUTO=0", "TERM_PROGRAM_VERSION=1.142.0", "NV_CUDA_CUDART_VERSION=12.3.101-1", "CUDA_VERSION=12.3.2", "NVARCH=x86_64", "NV_LIBCUBLAS_PACKAGE=libcublas-12-3=12.3.4.1-1", "PWD=/workspace/ergm-based-diffusion-simulations/julia_env", "NV_CUDNN_PACKAGE_NAME=libcudnn9-cuda-12", "DISPLAY=:100", "KERAS_BACKEND=torch", "TERM_PROGRAM=vscode", "VSCODE_GIT_ASKPASS_NODE=/root/.vscode-server/bin/6d62b1d5dace93a33b3a6d3eca1317bd5e15bcb1/node", "LESSOPEN=| /usr/bin/lesspipe %s", "COPILOT_DEBUG_NONCE=475b7d6aab0d39b9250b9b62470893e8", "SHELL=/bin/bash", "VSCODE_GIT_ASKPASS_MAIN=/root/.vscode-server/bin/6d62b1d5dace93a33b3a6d3eca1317bd5e15bcb1/extensions/git/dist/askpass-main.js", "NV_LIBNPP_PACKAGE=libnpp-12-3=12.2.3.2-1", "NV_LIBNPP_VERSION=12.2.3.2-1", "NVIDIA_REQUIRE_CUDA=cuda>=12.3 brand=tesla,driver>=470,driver<471 brand=unknown,driver>=470,driver<471 brand=nvidia,driver>=470,driver<471 brand=nvidiartx,driver>=470,driver<471 brand=geforce,driver>=470,driver<471 brand=geforcertx,driver>=470,driver<471 brand=quadro,driver>=470,driver<471 brand=quadrortx,driver>=470,driver<471 brand=titan,driver>=470,driver<471 brand=titanrtx,driver>=470,driver<471 brand=tesla,driver>=525,driver<526 brand=unknown,driver>=525,driver<526 brand=nvidia,driver>=525,driver<526 brand=nvidiartx,driver>=525,driver<526 brand=geforce,driver>=525,driver<526 brand=geforcertx,driver>=525,driver<526 brand=quadro,driver>=525,driver<526 brand=quadrortx,driver>=525,driver<526 brand=titan,driver>=525,driver<526 brand=titanrtx,driver>=525,driver<526 brand=tesla,driver>=535,driver<536 brand=unknown,driver>=535,driver<536 brand=nvidia,driver>=535,driver<536 brand=nvidiartx,driver>=535,driver<536 brand=geforce,driver>=535,driver<536 brand=geforcertx,driver>=535,driver<536 brand=quadro,driver>=535,driver<536 brand=quadrortx,driver>=535,driver<536 brand=titan,driver>=535,driver<536 brand=titanrtx,driver>=535,driver<536", "VSCODE_IPC_HOOK_CLI=/tmp/vscode-ipc-c9254d7f-f8df-436f-9b32-6c7cae6fe324.sock", "VSCODE_GIT_ASKPASS_EXTRA_ARGS=", "VSCODE_GIT_IPC_HANDLE=/tmp/vscode-git-adccb2f869.sock", "NV_LIBNCCL_PACKAGE=libnccl2=2.20.3-1+cuda12.3", "NV_CUDNN_PACKAGE=libcudnn9-cuda-12=9.0.0.312-1", "CURL=/usr/bin/curl", "NV_NVTX_VERSION=12.3.101-1", "CONTAINER_NAME=collaborative-env", "NV_LIBCUBLAS_VERSION=12.3.4.1-1", "DEBIAN_FRONTEND=noninteractive", "PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/local/lib/pkgconfig:/usr/share/pkgconfig", "JULIA_LOAD_PATH=@stdlib", "JULIA_CMDSTAN_HOME=/opt/cmdstan", "REMOTE_CONTAINERS_SOCKETS=[\"/root/.gnupg/S.gpg-agent\"]", "NV_CUDNN_VERSION=9.0.0.312", "NV_LIBNCCL_PACKAGE_NAME=libnccl2", "REMOTE_CONTAINERS_IPC=/tmp/vscode-remote-containers-ipc-4eeedda8-7cd6-45ba-8a2d-49a37537b4b5.sock", "JULIA_DEBUG=PackageCompiler", "HOME=/root", "TERM=xterm-256color", "LS_COLORS=rs=0:di=01;34:ln=01;36:mh=00:pi=40;33:so=01;35:do=01;35:bd=40;33;01:cd=40;33;01:or=40;31;01:mi=00:su=37;41:sg=30;43:ca=30;41:tw=30;42:ow=34;42:st=37;44:ex=01;32:*.tar=01;31:*.tgz=01;31:*.arc=01;31:*.arj=01;31:*.taz=01;31:*.lha=01;31:*.lz4=01;31:*.lzh=01;31:*.lzma=01;31:*.tlz=01;31:*.txz=01;31:*.tzo=01;31:*.t7z=01;31:*.zip=01;31:*.z=01;31:*.dz=01;31:*.gz=01;31:*.lrz=01;31:*.lz=01;31:*.lzo=01;31:*.xz=01;31:*.zst=01;31:*.tzst=01;31:*.bz2=01;31:*.bz=01;31:*.tbz=01;31:*.tbz2=01;31:*.tz=01;31:*.deb=01;31:*.rpm=01;31:*.jar=01;31:*.war=01;31:*.ear=01;31:*.sar=01;31:*.rar=01;31:*.alz=01;31:*.ace=01;31:*.zoo=01;31:*.cpio=01;31:*.7z=01;31:*.rz=01;31:*.cab=01;31:*.wim=01;31:*.swm=01;31:*.dwm=01;31:*.esd=01;31:*.jpg=01;35:*.jpeg=01;35:*.mjpg=01;35:*.mjpeg=01;35:*.gif=01;35:*.bmp=01;35:*.pbm=01;35:*.pgm=01;35:*.ppm=01;35:*.tga=01;35:*.xbm=01;35:*.xpm=01;35:*.tif=01;35:*.tiff=01;35:*.png=01;35:*.svg=01;35:*.svgz=01;35:*.mng=01;35:*.pcx=01;35:*.mov=01;35:*.mpg=01;35:*.mpeg=01;35:*.m2v=01;35:*.mkv=01;35:*.webm=01;35:*.webp=01;35:*.ogm=01;35:*.mp4=01;35:*.m4v=01;35:*.mp4v=01;35:*.vob=01;35:*.qt=01;35:*.nuv=01;35:*.wmv=01;35:*.asf=01;35:*.rm=01;35:*.rmvb=01;35:*.flc=01;35:*.avi=01;35:*.fli=01;35:*.flv=01;35:*.gl=01;35:*.dl=01;35:*.xcf=01;35:*.xwd=01;35:*.yuv=01;35:*.cgm=01;35:*.emf=01;35:*.ogv=01;35:*.ogx=01;35:*.aac=00;36:*.au=00;36:*.flac=00;36:*.m4a=00;36:*.mid=00;36:*.midi=00;36:*.mka=00;36:*.mp3=00;36:*.mpc=00;36:*.ogg=00;36:*.ra=00;36:*.wav=00;36:*.oga=00;36:*.opus=00;36:*.spx=00;36:*.xspf=00;36:", "COLORTERM=truecolor", "HOSTNAME=9deda958be2a", "OPENBLAS_MAIN_FREE=1"])
 └ @ PackageCompiler ~/.julia/packages/PackageCompiler/FtDNu/src/PackageCompiler.jl:272
-┌ Debug: running `g++ -m64 -march=x86-64 -shared -L/opt/julia/lib -L/opt/julia/lib/julia -o /tmp/jl_auoeeo/sys.so -Wl,--whole-archive /tmp/jl_auoeeo/sys-o.a -Wl,--no-whole-archive -Wl,-rpath-link,/opt/julia/lib -Wl,-rpath-link,/opt/julia/lib/julia -ljulia -ljulia-internal -fPIC -Wl,-soname,sys.so '-Wl,-rpath,$ORIGIN:$ORIGIN/julia'`
+┌ Debug: running `g++ -m64 -march=x86-64 -shared -L/opt/julia/lib -L/opt/julia/lib/julia -o /tmp/jl_0FztPE/sys.so -Wl,--whole-archive /tmp/jl_0FztPE/sys-o.a -Wl,--no-whole-archive -Wl,-rpath-link,/opt/julia/lib -Wl,-rpath-link,/opt/julia/lib/julia -ljulia -ljulia-internal -fPIC -Wl,-soname,sys.so '-Wl,-rpath,$ORIGIN:$ORIGIN/julia'`
 └ @ PackageCompiler ~/.julia/packages/PackageCompiler/FtDNu/src/PackageCompiler.jl:195
-┌ Debug: ensurecompiled: running `/opt/julia/bin/julia --color=auto --startup-file=no --pkgimages=no --sysimage=/tmp/jl_auoeeo/sys.so -e 'using Pkg; Pkg.precompile()'`
+┌ Debug: ensurecompiled: running `/opt/julia/bin/julia --color=auto --startup-file=no --pkgimages=no --sysimage=/tmp/jl_0FztPE/sys.so -e 'using Pkg; Pkg.precompile()'`
 │   JULIA_LOAD_PATH = "/workspace/ergm-based-diffusion-simulations/julia_env:@stdlib"
 └ @ PackageCompiler ~/.julia/packages/PackageCompiler/FtDNu/src/PackageCompiler.jl:298
 Precompiling Pkg...
-   4717.6 ms  ✓ Unicode
-   3629.8 ms  ✓ Logging
-   3726.8 ms  ✓ MozillaCACerts_jll
-   3753.4 ms  ✓ UUIDs
-   3778.2 ms  ✓ NetworkOptions
-   3806.8 ms  ✓ MbedTLS_jll
-   3867.6 ms  ✓ Zlib_jll
-   3934.2 ms  ✓ Base64
-   4492.7 ms  ✓ ArgTools
-   2235.5 ms  ✓ LibSSH2_jll
-   2442.3 ms  ✓ Tar
-   3309.4 ms  ✓ p7zip_jll
-   3322.0 ms  ✓ nghttp2_jll
-   3432.5 ms  ✓ Printf
-   2229.3 ms  ✓ LibGit2_jll
-   5034.3 ms  ✓ Markdown
-   2190.1 ms  ✓ LibCURL_jll
-   3642.1 ms  ✓ Dates
-   2381.7 ms  ✓ LibCURL
-   3803.5 ms  ✓ LibGit2
-   2330.9 ms  ✓ TOML
-   4337.0 ms  ✓ Downloads
-  43364.9 ms  ✓ Pkg
+   4602.2 ms  ✓ Unicode
+   3584.1 ms  ✓ UUIDs
+   3671.2 ms  ✓ MozillaCACerts_jll
+   3749.8 ms  ✓ Zlib_jll
+   3840.3 ms  ✓ NetworkOptions
+   3852.6 ms  ✓ Base64
+   3877.8 ms  ✓ MbedTLS_jll
+   3907.9 ms  ✓ Logging
+   4619.9 ms  ✓ ArgTools
+   2230.0 ms  ✓ LibSSH2_jll
+   3230.4 ms  ✓ p7zip_jll
+   3349.4 ms  ✓ nghttp2_jll
+   3377.8 ms  ✓ Printf
+   2470.2 ms  ✓ Tar
+   2201.5 ms  ✓ LibGit2_jll
+   5020.7 ms  ✓ Markdown
+   2198.3 ms  ✓ LibCURL_jll
+   3637.4 ms  ✓ Dates
+   2398.8 ms  ✓ LibCURL
+   3790.9 ms  ✓ LibGit2
+   2305.4 ms  ✓ TOML
+   4299.7 ms  ✓ Downloads
+  43423.9 ms  ✓ Pkg
   23 dependencies successfully precompiled in 63 seconds
 Precompiling project...
-   3480.3 ms  ✓ DataValueInterfaces
-   3608.3 ms  ✓ InvertedIndices
-   3826.3 ms  ✓ LaTeXStrings
-   3842.1 ms  ✓ OrderedCollections
-   3861.4 ms  ✓ TextWrap
-   3917.1 ms  ✓ OpenLibm_jll
-   4195.3 ms  ✓ Serialization
-   4925.5 ms  ✓ FillArrays
-   3553.3 ms  ✓ Reexport
-   3569.0 ms  ✓ Glob
-   4151.9 ms  ✓ InverseFunctions
-   3841.7 ms  ✓ Statistics
-   4188.7 ms  ✓ DocStringExtensions
-   4595.9 ms  ✓ InlineStrings
-   3665.9 ms  ✓ Adapt
-   4708.7 ms  ✓ IrrationalConstants
-   3677.5 ms  ✓ IteratorInterfaceExtensions
-   3728.5 ms  ✓ DataAPI
-   3770.2 ms  ✓ WorkerUtilities
-   4289.8 ms  ✓ ConstructionBase
-   3814.0 ms  ✓ StatsAPI
-   3739.6 ms  ✓ CompilerSupportLibraries_jll
-   3660.1 ms  ✓ Mmap
-   4619.1 ms  ✓ Crayons
-   3991.2 ms  ✓ SuiteSparse_jll
-   3656.8 ms  ✓ CompositionsBase
-  15788.4 ms  ✓ StyledStrings
-   4104.1 ms  ✓ Future
-   4131.8 ms  ✓ Gamma
-   3685.7 ms  ✓ PtrArrays
-   3925.4 ms  ✓ StaticArraysCore
-   4971.3 ms  ✓ InteractiveUtils
-   6407.3 ms  ✓ MacroTools
-   3856.4 ms  ✓ TranscodingStreams
-   4776.7 ms  ✓ SentinelArrays
-   4155.9 ms  ✓ Scratch
-   4083.4 ms  ✓ Compat
-   4304.0 ms  ✓ StructTypes
-   4688.6 ms  ✓ Preferences
-   5053.3 ms  ✓ LazyArtifacts
-   4477.7 ms  ✓ ArgParse
-   3768.4 ms  ✓ NaNMath
-   6556.3 ms  ✓ DataStructures
-   3952.1 ms  ✓ FillArrays → FillArraysStatisticsExt
-   3995.3 ms  ✓ InverseFunctions → InverseFunctionsDatesExt
-   4362.3 ms  ✓ ArrayInterface
-   5486.0 ms  ✓ Distributed
-   4546.7 ms  ✓ LogExpFunctions
-   3635.4 ms  ✓ TableTraits
-   3964.4 ms  ✓ Missings
-   4008.5 ms  ✓ ConstructionBase → ConstructionBaseLinearAlgebraExt
-   3844.9 ms  ✓ CompositionsBase → CompositionsBaseInverseFunctionsExt
-   3920.7 ms  ✓ PooledArrays
-   3832.6 ms  ✓ AliasTables
-   4007.3 ms  ✓ DiffResults
-   5112.6 ms  ✓ HypergeometricFunctions
-   3770.9 ms  ✓ CodecZlib
-   4297.1 ms  ✓ CommonSubexpressions
-   3565.9 ms  ✓ RelocatableFolders
-   3966.8 ms  ✓ Compat → CompatLinearAlgebraExt
-   9371.4 ms  ✓ SparseArrays
-   3900.9 ms  ✓ PrecompileTools
-   3820.9 ms  ✓ JLLWrappers
-   4254.5 ms  ✓ SortingAlgorithms
-   4323.7 ms  ✓ ArrayInterface → ArrayInterfaceFillArraysExt
-   4877.8 ms  ✓ QuadGK
-   4030.7 ms  ✓ ArrayInterface → ArrayInterfaceStaticArraysCoreExt
-   4275.1 ms  ✓ ProgressMeter
-   3783.1 ms  ✓ LogExpFunctions → LogExpFunctionsInverseFunctionsExt
-   4236.0 ms  ✓ Tables
-   6027.6 ms  ✓ Setfield
-   4723.9 ms  ✓ FilePathsBase
-   4637.6 ms  ✓ SuiteSparse
-   4372.5 ms  ✓ FillArrays → FillArraysSparseArraysExt
-   7103.6 ms  ✓ Accessors
-   6666.8 ms  ✓ PackageCompiler
-   4735.6 ms  ✓ Statistics → SparseArraysExt
-   4251.9 ms  ✓ Adapt → AdaptSparseArraysExt
-   4496.1 ms  ✓ ArrayInterface → ArrayInterfaceSparseArraysExt
-   4330.9 ms  ✓ CommonSolve
-   4674.1 ms  ✓ ADTypes
-   4245.3 ms  ✓ Rmath_jll
-   4373.8 ms  ✓ Libiconv_jll
-   4375.4 ms  ✓ OpenSpecFun_jll
-   6227.8 ms  ✓ StringManipulation
-   3578.0 ms  ✓ FilePathsBase → FilePathsBaseMmapExt
-   4307.1 ms  ✓ FiniteDiff
-   4817.7 ms  ✓ PDMats
-   4654.2 ms  ✓ Accessors → LinearAlgebraExt
-   4235.5 ms  ✓ ADTypes → ADTypesConstructionBaseExt
-   5201.2 ms  ✓ DifferentiationInterface
-   5081.4 ms  ✓ Rmath
-   4860.5 ms  ✓ XML2_jll
-   7620.9 ms  ✓ StatsBase
-   4576.8 ms  ✓ FiniteDiff → FiniteDiffSparseArraysExt
-   4705.8 ms  ✓ FillArrays → FillArraysPDMatsExt
-   3996.1 ms  ✓ DifferentiationInterface → DifferentiationInterfaceFiniteDiffExt
-   7419.7 ms  ✓ SpecialFunctions
-   4237.7 ms  ✓ DifferentiationInterface → DifferentiationInterfaceSparseArraysExt
-  16543.1 ms  ✓ Parsers
-   4673.8 ms  ✓ EzXML
-   7951.1 ms  ✓ Roots
-   4309.3 ms  ✓ PDMats → StatsBaseExt
-   3705.5 ms  ✓ DiffRules
-   3316.3 ms  ✓ InlineStrings → ParsersExt
-   4255.9 ms  ✓ NLSolversBase
-   4318.6 ms  ✓ StatsFuns
-   2522.2 ms  ✓ StatsFuns → StatsFunsInverseFunctionsExt
-   3109.4 ms  ✓ WeakRefStrings
-   5356.1 ms  ✓ ForwardDiff
-   9306.1 ms  ✓ JSON3
-   2561.1 ms  ✓ Roots → RootsForwardDiffExt
-   3374.0 ms  ✓ DifferentiationInterface → DifferentiationInterfaceForwardDiffExt
-   8386.9 ms  ✓ Distributions
-   3586.1 ms  ✓ LsqFit
-  13761.2 ms  ✓ CSV
-  52679.6 ms  ✓ REPL
-  13261.9 ms  ✓ Pkg → REPLExt
-  20074.1 ms  ✓ PrettyTables
-  34476.0 ms  ✓ DataFrames
-   6756.7 ms  ✓ diffusion_sim
+   3400.0 ms  ✓ OpenLibm_jll
+   3590.8 ms  ✓ LaTeXStrings
+   3739.5 ms  ✓ DataValueInterfaces
+   3903.4 ms  ✓ OrderedCollections
+   4034.7 ms  ✓ InvertedIndices
+   4213.5 ms  ✓ TextWrap
+   4589.9 ms  ✓ Serialization
+   5190.3 ms  ✓ FillArrays
+   3698.8 ms  ✓ Reexport
+   3948.2 ms  ✓ InverseFunctions
+   3582.1 ms  ✓ Glob
+   4219.4 ms  ✓ DocStringExtensions
+   4171.1 ms  ✓ InlineStrings
+   4220.6 ms  ✓ Statistics
+   3943.2 ms  ✓ Adapt
+   4622.7 ms  ✓ IrrationalConstants
+   3638.9 ms  ✓ IteratorInterfaceExtensions
+   3586.2 ms  ✓ WorkerUtilities
+   3587.0 ms  ✓ StatsAPI
+   3895.8 ms  ✓ DataAPI
+   4445.4 ms  ✓ ConstructionBase
+   4199.8 ms  ✓ CompilerSupportLibraries_jll
+   3736.4 ms  ✓ Mmap
+   5165.8 ms  ✓ Crayons
+   3613.8 ms  ✓ SuiteSparse_jll
+   3448.4 ms  ✓ CompositionsBase
+  15239.4 ms  ✓ StyledStrings
+   3874.7 ms  ✓ Future
+   4025.7 ms  ✓ Gamma
+   3769.8 ms  ✓ PtrArrays
+   5168.2 ms  ✓ InteractiveUtils
+   6483.9 ms  ✓ MacroTools
+   4130.2 ms  ✓ StaticArraysCore
+   4057.6 ms  ✓ TranscodingStreams
+   4250.3 ms  ✓ SentinelArrays
+   3829.2 ms  ✓ Scratch
+   4118.2 ms  ✓ Compat
+   5297.1 ms  ✓ StructTypes
+   3942.5 ms  ✓ Preferences
+   4088.7 ms  ✓ NaNMath
+   4826.1 ms  ✓ LazyArtifacts
+   3898.2 ms  ✓ InverseFunctions → InverseFunctionsDatesExt
+   3903.9 ms  ✓ FillArrays → FillArraysStatisticsExt
+   5251.1 ms  ✓ ArgParse
+   4095.5 ms  ✓ ArrayInterface
+   6259.8 ms  ✓ DataStructures
+   4241.5 ms  ✓ LogExpFunctions
+   6085.4 ms  ✓ Distributed
+   3654.4 ms  ✓ TableTraits
+   3634.1 ms  ✓ Missings
+   3535.3 ms  ✓ ConstructionBase → ConstructionBaseLinearAlgebraExt
+   3663.6 ms  ✓ CompositionsBase → CompositionsBaseInverseFunctionsExt
+   4311.7 ms  ✓ PooledArrays
+   4266.7 ms  ✓ AliasTables
+   4725.7 ms  ✓ HypergeometricFunctions
+   3516.3 ms  ✓ DiffResults
+   4849.7 ms  ✓ CommonSubexpressions
+   3963.3 ms  ✓ CodecZlib
+   4381.7 ms  ✓ RelocatableFolders
+   3797.5 ms  ✓ Compat → CompatLinearAlgebraExt
+   9415.1 ms  ✓ SparseArrays
+   4254.5 ms  ✓ PrecompileTools
+   3852.3 ms  ✓ ArrayInterface → ArrayInterfaceFillArraysExt
+   4417.6 ms  ✓ JLLWrappers
+   3599.8 ms  ✓ SortingAlgorithms
+   4125.8 ms  ✓ ArrayInterface → ArrayInterfaceStaticArraysCoreExt
+   3677.9 ms  ✓ LogExpFunctions → LogExpFunctionsInverseFunctionsExt
+   4970.5 ms  ✓ QuadGK
+   4129.9 ms  ✓ Tables
+   4959.8 ms  ✓ ProgressMeter
+   5101.7 ms  ✓ Setfield
+   4821.3 ms  ✓ FilePathsBase
+   4134.3 ms  ✓ SuiteSparse
+   6421.5 ms  ✓ PackageCompiler
+   7364.8 ms  ✓ Accessors
+   4687.9 ms  ✓ FillArrays → FillArraysSparseArraysExt
+   4802.4 ms  ✓ Statistics → SparseArraysExt
+   4037.2 ms  ✓ ArrayInterface → ArrayInterfaceSparseArraysExt
+   4660.3 ms  ✓ Adapt → AdaptSparseArraysExt
+   4833.0 ms  ✓ CommonSolve
+   4147.7 ms  ✓ Rmath_jll
+   5187.9 ms  ✓ ADTypes
+   4269.2 ms  ✓ OpenSpecFun_jll
+   4019.1 ms  ✓ FiniteDiff
+   4644.0 ms  ✓ Libiconv_jll
+   6281.0 ms  ✓ StringManipulation
+   3894.6 ms  ✓ FilePathsBase → FilePathsBaseMmapExt
+   4652.2 ms  ✓ Accessors → LinearAlgebraExt
+   4828.1 ms  ✓ PDMats
+   4506.1 ms  ✓ ADTypes → ADTypesConstructionBaseExt
+   4957.8 ms  ✓ Rmath
+   5225.8 ms  ✓ DifferentiationInterface
+   6647.3 ms  ✓ StatsBase
+   4322.7 ms  ✓ FiniteDiff → FiniteDiffSparseArraysExt
+   7274.1 ms  ✓ SpecialFunctions
+   5072.5 ms  ✓ XML2_jll
+   4332.6 ms  ✓ DifferentiationInterface → DifferentiationInterfaceFiniteDiffExt
+   4865.2 ms  ✓ FillArrays → FillArraysPDMatsExt
+   4104.0 ms  ✓ DifferentiationInterface → DifferentiationInterfaceSparseArraysExt
+  17202.4 ms  ✓ Parsers
+   4345.4 ms  ✓ PDMats → StatsBaseExt
+   4016.1 ms  ✓ DiffRules
+   8338.5 ms  ✓ Roots
+   4400.2 ms  ✓ EzXML
+   4361.2 ms  ✓ NLSolversBase
+   5322.0 ms  ✓ StatsFuns
+   3701.6 ms  ✓ InlineStrings → ParsersExt
+   2541.0 ms  ✓ StatsFuns → StatsFunsInverseFunctionsExt
+   2769.0 ms  ✓ WeakRefStrings
+   5980.4 ms  ✓ ForwardDiff
+   9026.7 ms  ✓ JSON3
+   3306.1 ms  ✓ DifferentiationInterface → DifferentiationInterfaceForwardDiffExt
+   3626.1 ms  ✓ Roots → RootsForwardDiffExt
+   7701.3 ms  ✓ Distributions
+   3546.9 ms  ✓ LsqFit
+  13303.7 ms  ✓ CSV
+  54283.4 ms  ✓ REPL
+  12927.8 ms  ✓ Pkg → REPLExt
+  19410.3 ms  ✓ PrettyTables
+  33821.0 ms  ✓ DataFrames
+   6559.8 ms  ✓ diffusion_sim
   121 dependencies successfully precompiled in 140 seconds. 23 already precompiled.
 ┌ Debug: running precompilation execution script...
 └ @ PackageCompiler ~/.julia/packages/PackageCompiler/FtDNu/src/PackageCompiler.jl:350
-┌ Debug: run_precompilation_script: running `/opt/julia/bin/julia --color=auto --startup-file=no --pkgimages=no --sysimage=/tmp/jl_auoeeo/sys.so --compile=all --trace-compile=/tmp/jl_packagecompiler_8CGVLR/jl_ZurKti /workspace/ergm-based-diffusion-simulations/julia_env/precompile_exec.jl`
+┌ Debug: run_precompilation_script: running `/opt/julia/bin/julia --color=auto --startup-file=no --pkgimages=no --sysimage=/tmp/jl_0FztPE/sys.so --compile=all --trace-compile=/tmp/jl_packagecompiler_n0XMmD/jl_VLfdtv /workspace/ergm-based-diffusion-simulations/julia_env/precompile_exec.jl`
 │   JULIA_LOAD_PATH = "/workspace/ergm-based-diffusion-simulations/julia_env:@stdlib"
 └ @ PackageCompiler ~/.julia/packages/PackageCompiler/FtDNu/src/PackageCompiler.jl:311
-[ Info: PackageCompiler: Executing /workspace/ergm-based-diffusion-simulations/julia_env/precompile_exec.jl => /tmp/jl_packagecompiler_8CGVLR/jl_ZurKti
+[ Info: PackageCompiler: Executing /workspace/ergm-based-diffusion-simulations/julia_env/precompile_exec.jl => /tmp/jl_packagecompiler_n0XMmD/jl_VLfdtv
 [ Info: precompile_exec.jl loaded
 Loaded network: 30 nodes, 120 directed edges
 Batch written: 4 runs on 1 threads (established=4)
-  Records:  /tmp/jl_v7j2Rr/precompile_results.jsonl
-  Manifest: /tmp/jl_v7j2Rr/precompile_results.manifest.json
+  Records:  /tmp/jl_Tp4miU/precompile_results.jsonl
+  Manifest: /tmp/jl_Tp4miU/precompile_results.manifest.json
 [ Info: precompile sbi_batch finished: 4 records
 [ Info: PackageCompiler: Done
-┌ Debug: writing precompile staging code to /tmp/jl_wToRQVinS7
+┌ Debug: writing precompile staging code to /tmp/jl_wPyfEdIhap
 └ @ PackageCompiler ~/.julia/packages/PackageCompiler/FtDNu/src/PackageCompiler.jl:461
-┌ Debug: running `/opt/julia/bin/julia --color=auto --startup-file=no --pkgimages=no --cpu-target=generic --compile=all --sysimage=/tmp/jl_auoeeo/sys.so --project=/workspace/ergm-based-diffusion-simulations/julia_env --output-o=/tmp/jl_cpeHQVi9UB-o.a --threads=1 /tmp/jl_wToRQVinS7`
+┌ Debug: running `/opt/julia/bin/julia --color=auto --startup-file=no --pkgimages=no --cpu-target=generic --compile=all --sysimage=/tmp/jl_0FztPE/sys.so --project=/workspace/ergm-based-diffusion-simulations/julia_env --output-o=/tmp/jl_cB0zaLONkd-o.a --threads=1 /tmp/jl_wPyfEdIhap`
 └ @ PackageCompiler ~/.julia/packages/PackageCompiler/FtDNu/src/PackageCompiler.jl:473
 - PackageCompiler: compiling nonincremental system image
-┌ Debug: running `g++ -m64 -march=x86-64 -shared -L/opt/julia/lib -L/opt/julia/lib/julia -o /workspace/ergm-based-diffusion-simulations/julia_env/build/diffusion_sim_app/lib/julia/sys.so -Wl,--whole-archive /tmp/jl_cpeHQVi9UB-o.a -Wl,--no-whole-archive -Wl,-rpath-link,/opt/julia/lib -Wl,-rpath-link,/opt/julia/lib/julia -ljulia -ljulia-internal -fPIC -Wl,-soname,sys.so '-Wl,-rpath,$ORIGIN:$ORIGIN/julia'`
+┌ Debug: running `g++ -m64 -march=x86-64 -shared -L/opt/julia/lib -L/opt/julia/lib/julia -o /workspace/ergm-based-diffusion-simulations/julia_env/build/diffusion_sim_app/lib/julia/sys.so -Wl,--whole-archive /tmp/jl_cB0zaLONkd-o.a -Wl,--no-whole-archive -Wl,-rpath-link,/opt/julia/lib -Wl,-rpath-link,/opt/julia/lib/julia -ljulia -ljulia-internal -fPIC -Wl,-soname,sys.so '-Wl,-rpath,$ORIGIN:$ORIGIN/julia'`
 └ @ PackageCompiler ~/.julia/packages/PackageCompiler/FtDNu/src/PackageCompiler.jl:195
 ┌ Debug: running `gcc '-DJULIA_MAIN="diffusion_sim.julia_main"' -DNEW_DEFINE_FAST_TLS_SYNTAX -m64 -march=x86-64 -o /workspace/ergm-based-diffusion-simulations/julia_env/build/diffusion_sim_app/bin/diffusion_sim /root/.julia/packages/PackageCompiler/FtDNu/src/embedding_wrapper.c '-Wl,-rpath,$ORIGIN/../lib:$ORIGIN/../lib/julia' -Werror-implicit-function-declaration -O2 -std=gnu11 -I/opt/julia/include/julia -fPIC -L/opt/julia/lib -L/opt/julia/lib/julia -Wl,--export-dynamic -Wl,-rpath-link,/opt/julia/lib -Wl,-rpath-link,/opt/julia/lib/julia -ljulia -ljulia-internal`
 └ @ PackageCompiler ~/.julia/packages/PackageCompiler/FtDNu/src/PackageCompiler.jl:195

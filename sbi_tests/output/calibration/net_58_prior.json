@@ -1,0 +1,250 @@
+{
+  "village": "net_58",
+  "graphml": "/workspace/ergm_data/sim_test_data/synthetic_village_m_graphml/net_58.graphml",
+  "date": "2026-10-26",
+  "target": 0.5,
+  "metric": "established",
+  "suggested": 0.291,
+  "chosen_inf_r_median": 0.29,
+  "spec": {
+    "inf_r": [
+      "logitnormal",
+      {
+        "median": 0.29,
+        "sd": 0.75
+      }
+    ],
+    "b_int": [
+      "normal",
+      {
+        "mean": 0.0,
+        "sd": 1.0
+      }
+    ],
+    "b_close": [
+      "truncated_normal",
+      {
+        "mean": 1.0,
+        "sd": 1.0,
+        "lower": 0.0
+      }
+    ],
+    "b_cxn_peers": [
+      "normal",
+      {
+        "mean": 0.0,
+        "sd": 1.0
+      }
+    ],
+    "b_cxn_total": [
+      "normal",
+      {
+        "mean": 0.0,
+        "sd": 1.0
+      }
+    ],
+    "b_cxn_symp": [
+      "normal",
+      {
+        "mean": 0.0,
+        "sd": 1.0
+      }
+    ],
+    "b_cls_x_smp": [
+      "normal",
+      {
+        "mean": 0.0,
+        "sd": 0.5
+      }
+    ],
+    "p_symp": [
+      "beta",
+      {
+        "a": 2.0,
+        "b": 2.0
+      }
+    ],
+    "rec_scale": [
+      "lognormal",
+      {
+        "median": 10.0,
+        "sigma": 0.4
+      }
+    ],
+    "rec_shape": [
+      "gamma",
+      {
+        "shape": 4.0,
+        "scale": 0.5
+      }
+    ],
+    "imm_scale": [
+      "lognormal",
+      {
+        "median": 180.0,
+        "sigma": 0.4
+      }
+    ],
+    "imm_shape": [
+      "gamma",
+      {
+        "shape": 4.0,
+        "scale": 0.5
+      }
+    ]
+  },
+  "scan": {
+    "village": "net_58",
+    "graphml": "/workspace/ergm_data/sim_test_data/synthetic_village_m_graphml/net_58.graphml",
+    "n_nodes": 2500,
+    "n": 200,
+    "seed": 2026,
+    "inf_r_logit_sd": 0.75,
+    "b_int_mean": 0.0,
+    "cells": [
+      {
+        "inf_r_median": 0.02,
+        "runs": 200,
+        "nonstarter": 0.5,
+        "extinct": 0.485,
+        "fit_failed": 0.0,
+        "established": 0.015,
+        "fit_success": 0.03,
+        "people_median": 4.0,
+        "people_p90": 11.100000000000009,
+        "people_max": 1022.0,
+        "K_median": 0.06144998776101834
+      },
+      {
+        "inf_r_median": 0.05,
+        "runs": 200,
+        "nonstarter": 0.295,
+        "extinct": 0.66,
+        "fit_failed": 0.01,
+        "established": 0.035,
+        "fit_success": 0.04964539007092199,
+        "people_median": 7.0,
+        "people_p90": 32.0,
+        "people_max": 1593.9999999999998,
+        "K_median": 0.04413073630845542
+      },
+      {
+        "inf_r_median": 0.1,
+        "runs": 200,
+        "nonstarter": 0.19,
+        "extinct": 0.665,
+        "fit_failed": 0.005,
+        "established": 0.14,
+        "fit_success": 0.1728395061728395,
+        "people_median": 10.0,
+        "people_p90": 460.40000000000066,
+        "people_max": 1684.0,
+        "K_median": 0.2796884359861495
+      },
+      {
+        "inf_r_median": 0.15,
+        "runs": 200,
+        "nonstarter": 0.145,
+        "extinct": 0.605,
+        "fit_failed": 0.01,
+        "established": 0.24,
+        "fit_success": 0.2807017543859649,
+        "people_median": 15.0,
+        "people_p90": 1118.0,
+        "people_max": 1692.0,
+        "K_median": 0.39188985577238805
+      },
+      {
+        "inf_r_median": 0.2,
+        "runs": 200,
+        "nonstarter": 0.1,
+        "extinct": 0.545,
+        "fit_failed": 0.03,
+        "established": 0.325,
+        "fit_success": 0.3611111111111111,
+        "people_median": 28.0,
+        "people_p90": 1397.0999999999997,
+        "people_max": 1705.0000000000002,
+        "K_median": 0.44811840107598755
+      },
+      {
+        "inf_r_median": 0.3,
+        "runs": 200,
+        "nonstarter": 0.07,
+        "extinct": 0.405,
+        "fit_failed": 0.01,
+        "established": 0.515,
+        "fit_success": 0.553763440860215,
+        "people_median": 89.5,
+        "people_p90": 1545.5,
+        "people_max": 1731.0,
+        "K_median": 0.4904939404218117
+      },
+      {
+        "inf_r_median": 0.4,
+        "runs": 200,
+        "nonstarter": 0.065,
+        "extinct": 0.375,
+        "fit_failed": 0.015,
+        "established": 0.545,
+        "fit_success": 0.5828877005347594,
+        "people_median": 449.0,
+        "people_p90": 1639.2,
+        "people_max": 1733.0,
+        "K_median": 0.5375402997725774
+      },
+      {
+        "inf_r_median": 0.5,
+        "runs": 200,
+        "nonstarter": 0.045,
+        "extinct": 0.325,
+        "fit_failed": 0.01,
+        "established": 0.62,
+        "fit_success": 0.6492146596858639,
+        "people_median": 968.0,
+        "people_p90": 1673.0,
+        "people_max": 1733.0,
+        "K_median": 0.5760880871718544
+      },
+      {
+        "inf_r_median": 0.6,
+        "runs": 200,
+        "nonstarter": 0.035,
+        "extinct": 0.285,
+        "fit_failed": 0.0,
+        "established": 0.68,
+        "fit_success": 0.7046632124352331,
+        "people_median": 1169.0,
+        "people_p90": 1686.4,
+        "people_max": 1733.0,
+        "K_median": 0.6083637660444647
+      },
+      {
+        "inf_r_median": 0.7,
+        "runs": 200,
+        "nonstarter": 0.015,
+        "extinct": 0.265,
+        "fit_failed": 0.005,
+        "established": 0.715,
+        "fit_success": 0.7258883248730964,
+        "people_median": 1363.0,
+        "people_p90": 1716.0,
+        "people_max": 1733.0,
+        "K_median": 0.627729229356562
+      },
+      {
+        "inf_r_median": 0.8,
+        "runs": 200,
+        "nonstarter": 0.01,
+        "extinct": 0.225,
+        "fit_failed": 0.0,
+        "established": 0.765,
+        "fit_success": 0.7727272727272727,
+        "people_median": 1480.0,
+        "people_p90": 1723.3,
+        "people_max": 1733.0,
+        "K_median": 0.640783864153899
+      }
+    ]
+  }
+}

@@ -601,6 +601,9 @@ using ..diffusion_sim.richards_model: TargetRegion
 					"--n-seed-nodes"
 						arg_type = Int
 						default = 1
+					"--seed-component"
+						arg_type = String
+						default = "largest"
 					"--replicates"
 						arg_type = Int
 						default = 1
@@ -638,6 +641,9 @@ using ..diffusion_sim.richards_model: TargetRegion
 					if !(p["seed-mode"] in ("random", "file"))
 						throw(ArgumentError("--seed-mode must be random or file"))
 					end
+					if !(p["seed-component"] in ("largest", "any"))
+						throw(ArgumentError("--seed-component must be largest or any"))
+					end
 					if !(p["extinct-policy"] in ("exclude", "success", "failure"))
 						throw(ArgumentError("--extinct-policy must be exclude, success, or failure"))
 					end
@@ -651,6 +657,7 @@ using ..diffusion_sim.richards_model: TargetRegion
 					res = run_sbi_batch(p["graphml"], p["params"], p["out"];
 										village = p["village"],
 										sas_transformation = p["sas-transformation"],
+										seed_component = Symbol(p["seed-component"]),
 										region = region,
 										maxtime = p["max-time"],
 										transmission_method = Symbol(p["transmission"]),

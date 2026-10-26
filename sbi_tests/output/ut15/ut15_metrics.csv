@@ -1,0 +1,4 @@
+village,n_nodes,draws,nonstarter,extinct,established,fit_failed,fit_success_rate,extinct_share_of_viable,K_min,K_max,K_median,nan_free,a_median,frac_median,a_at_limit_share,t_half_median,tail_median,persistent_share_of_viable,failed_statuses,seconds
+net_43,2500,500,311,189,0,0,0.0,1.0,nan,nan,nan,True,nan,nan,nan,nan,nan,0.005291005291005291,none,6.944645166397095
+net_58,2500,500,320,180,0,0,0.0,1.0,nan,nan,nan,True,nan,nan,nan,nan,nan,0.005555555555555556,none,6.996812582015991
+net_83,2500,500,318,182,0,0,0.0,1.0,nan,nan,nan,True,nan,nan,nan,nan,nan,0.01098901098901099,none,6.986569881439209

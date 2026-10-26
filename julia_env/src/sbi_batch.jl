@@ -8,7 +8,8 @@
 #full trajectories as CSV, are unchanged.
 #Revised 26 October 2026: sas_transformation option, so that batches can use the
 #SAS-preprocessed network (symmetrized, with common-third ties) as the validated
-#replication did.
+#replication did. Seeds are drawn from the largest weakly connected component by
+#default (seed_component), and the manifest records the component structure.
 
 #   Modules
 	using .richards_model
@@ -98,24 +99,126 @@
 	`run_sbi_batch`, `draw_seed_nodes`
 	""" run_seeds
 
-#	Nodes Eligible as Seeds
-	function eligible_seed_nodes(alst::Matrix{Int})::Vector{Int}
+#	Helper Function for weak_components: root of a node's set, with path halving
+	function find_root!(parent::Vector{Int}, i::Int)::Int
+		"""
+		Args:
+			parent::Vector{Int}: union-find parent array (modified: paths are shortened)
+			i::Int: row index
+		Returns:
+			Int: the root row of i's set
+		"""
+
+		#	Walk to the root, halving the path
+			while parent[i] != i
+				parent[i] = parent[parent[i]]
+				i = parent[i]
+			end
+			return i
+	end
+
+#	Weakly Connected Components of a Network
+	function weak_components(alst::Matrix{Int})
 		"""
 		Args:
 			alst::Matrix{Int}: adjacency list from sim_prep (ID in column 1, neighbor IDs after, 0 padding)
 		Returns:
-			Vector{Int}: IDs of nodes with at least one tie to another node, in row order
+			NamedTuple: (label::Vector{Int}, sizes::Dict{Int,Int}, largest::Int)
+				label[i] is the component label of row i (the root row of its set);
+				sizes maps each label to its number of nodes; largest is the label
+				of the largest component
 		Notes:
-			Seeds are drawn only from these nodes (roadmap §4.9). An isolated
-			seed cannot transmit, so it would add non-starters that say
-			nothing about the parameters. A tie to oneself does not count.
+			Ties are treated as undirected, so a one-directional tie joins two
+			nodes (weak connectivity). Ties to oneself and to IDs not in the
+			network are ignored. If two components share the largest size, the
+			one containing the earliest row is chosen, so the choice is
+			deterministic. Added 26 October 2026.
 		"""
 
-		#	Keep rows with a neighbor other than the node itself
+		#	Union-find over the rows
+			n = size(alst, 1)
+			row_of = Dict(alst[i, 1] => i for i in 1:n)
+			parent = collect(1:n)
+			for i in 1:n, nbr in @view(alst[i, 2:end])
+				if nbr > 0 && nbr != alst[i, 1] && haskey(row_of, nbr)
+					ri = find_root!(parent, i)
+					rj = find_root!(parent, row_of[nbr])
+					if ri != rj
+						parent[max(ri, rj)] = min(ri, rj)
+					end
+				end
+			end
+
+		#	Labels and sizes
+			label = [find_root!(parent, i) for i in 1:n]
+			sizes = Dict{Int, Int}()
+			for l in label
+				sizes[l] = get(sizes, l, 0) + 1
+			end
+
+		#	Largest component, earliest row on a tie
+			largest = label[1]
+			for i in 1:n
+				if sizes[label[i]] > sizes[largest]
+					largest = label[i]
+				end
+			end
+
+		#	Assembling Result
+			return (label = label, sizes = sizes, largest = largest)
+	end
+	@doc raw"""
+	**Description**
+	Weakly connected components of a network in `sim_prep` format, with the largest identified.
+
+	**Usage**
+	`weak_components(alst)`
+
+	**Details**
+	Ties are treated as undirected. A component found this way is a set of nodes that an infection could in principle connect; a seed outside the largest component is confined to a small group with no further connection.
+
+	**Value**
+	`NamedTuple` `(label, sizes, largest)`: a component label for each row, the size of each component, and the label of the largest.
+
+	**See Also**
+	`eligible_seed_nodes`
+	""" weak_components
+
+#	Nodes Eligible as Seeds
+	function eligible_seed_nodes(alst::Matrix{Int}; component::Symbol=:largest)::Vector{Int}
+		"""
+		Args:
+			alst::Matrix{Int}: adjacency list from sim_prep (ID in column 1, neighbor IDs after, 0 padding)
+			component::Symbol: :largest (default) or :any
+		Returns:
+			Vector{Int}: IDs of eligible nodes, in row order
+		Notes:
+			A node is eligible if it names at least one other node, so that
+			as a seed it can transmit; a tie to oneself does not count.
+			With component = :largest (26 October 2026), it must also lie in
+			the largest weakly connected component. A seed in a small
+			component of a few people cannot start an epidemic whatever the
+			parameters, so its run says nothing about them; on the synthetic
+			village networks about 30% of nodes lie outside the largest
+			component. component = :any keeps the earlier rule (any node
+			with a tie), for comparison.
+		"""
+
+		#	Validation
+			if !(component in (:largest, :any))
+				throw(ArgumentError("component must be :largest or :any"))
+			end
+
+		#	Component of each row, when restricting to the largest
+			comps = component == :largest ? weak_components(alst) : nothing
+
+		#	Keep rows with a tie to another node (and in the largest component)
 			ids = Int[]
 			for i in 1:size(alst, 1)
 				ego_id = alst[i, 1]
-				if any(nbr -> nbr > 0 && nbr != ego_id, @view(alst[i, 2:end]))
+				has_tie = any(nbr -> nbr > 0 && nbr != ego_id, @view(alst[i, 2:end]))
+				in_scope = comps === nothing || comps.label[i] == comps.largest
+				if has_tie && in_scope
 					push!(ids, ego_id)
 				end
 			end
@@ -125,16 +228,19 @@
 	end
 	@doc raw"""
 	**Description**
-	The IDs of nodes that may be drawn as seeds: those with at least one tie to another node.
+	The IDs of nodes that may be drawn as seeds: by default, nodes in the largest weakly connected component that name at least one other node.
 
 	**Usage**
-	`eligible_seed_nodes(alst)`
+	`eligible_seed_nodes(alst; component=:largest)`
+
+	**Details**
+	`component = :largest` (the default since 26 October 2026) excludes seeds confined to small components, where an introduction dies out for structural reasons alone. `component = :any` keeps the earlier rule, any node with a tie to another node.
 
 	**Value**
 	`Vector{Int}` of node IDs.
 
 	**See Also**
-	`draw_seed_nodes`, `run_sbi_batch`
+	`weak_components`, `draw_seed_nodes`, `run_sbi_batch`
 	""" eligible_seed_nodes
 
 #	Seed Node Draw
@@ -555,6 +661,7 @@
 	function run_sbi_batch(graphml_file::String, params_file::String, out_file::String;
 						   village::String,
 						   sas_transformation::Bool=false,
+						   seed_component::Symbol=:largest,
 						   region::TargetRegion=TargetRegion(),
 						   maxtime::Int=200,
 						   transmission_method::Symbol=:weighted,
@@ -573,6 +680,8 @@
 			out_file::String: JSONL output, one line per run
 			village::String: village identifier for the records and manifest
 			sas_transformation::Bool: load the network with SAS preprocessing (default = false)
+			seed_component::Symbol: :largest (default) draws seeds from the largest weakly
+									connected component; :any from any node with a tie
 			region::TargetRegion: acceptable outcome region (default = unconstrained)
 			maxtime::Int: simulation horizon in days (default = 200)
 			transmission_method::Symbol: :weighted or :simple (default = :weighted)
@@ -624,7 +733,8 @@
 			alst = network.alst
 			vlst = network.vlst
 			n_nodes = size(alst, 1)
-			eligible = eligible_seed_nodes(alst)
+			eligible = eligible_seed_nodes(alst; component=seed_component)
+			comps = weak_components(alst)
 			if seed_mode == :random && !(1 <= n_seed_nodes <= length(eligible))
 				throw(ArgumentError("n_seed_nodes must be between 1 and $(length(eligible))"))
 			end
@@ -687,7 +797,10 @@
 
 		#	Write the manifest
 			manifest = (schema_version = SBI_SCHEMA_VERSION, village = village, graphml = graphml_file,
-						sas_transformation = sas_transformation, n_nodes = n_nodes, maxtime = maxtime, transmission = String(transmission_method),
+						sas_transformation = sas_transformation, n_nodes = n_nodes,
+						n_components = length(comps.sizes), largest_component = comps.sizes[comps.largest],
+						seed_component = String(seed_component), n_eligible_seeds = length(eligible),
+						maxtime = maxtime, transmission = String(transmission_method),
 						seed_mode = String(seed_mode), master_seed = master_seed, seed_file = seed_file,
 						n_seed_nodes = n_seed_nodes, replicates = replicates, n_draws = length(draws),
 						n_runs = length(tasks), extinct_policy = String(extinct_policy),
@@ -721,6 +834,7 @@
 	**Usage**
 	```julia
 	run_sbi_batch(graphml_file, params_file, out_file; village, sas_transformation=false,
+				  seed_component=:largest,
 				  region=TargetRegion(), maxtime=200, transmission_method=:weighted,
 				  seed_mode=:random, master_seed=nothing, seed_file=nothing,
 				  n_seed_nodes=1, replicates=1, extinct_policy=:exclude,
@@ -731,6 +845,7 @@
 	- `graphml_file`, `params_file`, `out_file`: Network, parameter draws (JSON array), and JSONL output.
 	- `village::String`: Identifier written to every record and the manifest.
 	- `sas_transformation::Bool`: Load the network with SAS preprocessing, as the validated replication did (default `false`). Isolated nodes drop out of the transformed network.
+	- `seed_component::Symbol`: `:largest` (default) draws seeds from the largest weakly connected component; `:any` from any node with a tie. The manifest records the number of components, the size of the largest, and the number of eligible seeds.
 	- `region::TargetRegion`: The acceptable outcome region.
 	- `seed_mode`: `:random` derives each run's seeds from `master_seed`; `:file` reads them from `seed_file` (testing mode).
 	- `n_seed_nodes`: Seed nodes per run, drawn from nodes with at least one tie.
