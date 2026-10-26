@@ -6,7 +6,8 @@ using JSON3
 using Random
 using DataFrames
 using ProgressMeter
-using ..diffusion_sim: sim_prep, sirdif
+using ..diffusion_sim: sim_prep, sirdif, run_sbi_batch
+using ..diffusion_sim.richards_model: TargetRegion
 
 #	Helper Function for CLI: write results (CSV + JSON metadata)
 	function _write_results(payload, outpath::AbstractString = "-")
@@ -281,7 +282,7 @@ using ..diffusion_sim: sim_prep, sirdif
 			)
 	end
 
-#	CLI Main Function (modes: single | sweep | multi)
+#	CLI Main Function (modes: single | sweep | multi | sbi_batch)
 	function cli_main(args::Vector{String} = ARGS)
 		"""
 		Args:
@@ -289,7 +290,13 @@ using ..diffusion_sim: sim_prep, sirdif
 		Returns:
 			Nothing
 		Notes:
-			Three modes: single run, parameter sweep, multi-network
+			Four modes: single run, parameter sweep, multi-network, and
+			sbi_batch. The first three write full trajectories as CSV with
+			JSON metadata. sbi_batch (26 October 2026) runs a batch of
+			parameter draws and writes one JSON line per run (schema
+			version 3) with a manifest, the output the Python layer reads.
+			Threads for sbi_batch come from Julia's start-up options
+			(julia -t N or JULIA_NUM_THREADS), not from an argument here.
 		"""
 		
 		#	No args: print usage
@@ -298,6 +305,7 @@ using ..diffusion_sim: sim_prep, sirdif
 				println("  single: diffusion_sim.CLI single --graphml <file> ... --out <path>")
 				println("  sweep:  diffusion_sim.CLI sweep  --graphml <file> ... --out <path>")
 				println("  multi:  diffusion_sim.CLI multi  --graphml <file1,file2> ... --out <path>")
+				println("  sbi_batch: diffusion_sim.CLI sbi_batch --graphml <file> --village <id> --params <draws.json> --out <results.jsonl> ...")
 				return nothing
 			end
 
@@ -559,8 +567,107 @@ using ..diffusion_sim: sim_prep, sirdif
 				return nothing
 			end
 
+		#	Schema: SBI_BATCH
+			if mode == "sbi_batch"
+				s = ArgParseSettings()
+				@add_arg_table! s begin
+					"--graphml"
+						arg_type = String
+						required = true
+					"--village"
+						arg_type = String
+						required = true
+					"--params"
+						arg_type = String
+						required = true
+					"--out"
+						arg_type = String
+						required = true
+					"--max-time"
+						arg_type = Int
+						default = 200
+					"--transmission"
+						arg_type = String
+						default = "weighted"
+					"--seed-mode"
+						arg_type = String
+						default = "random"
+					"--seed"
+						arg_type = Int
+					"--seed-file"
+						arg_type = String
+					"--n-seed-nodes"
+						arg_type = Int
+						default = 1
+					"--replicates"
+						arg_type = Int
+						default = 1
+					"--extinct-policy"
+						arg_type = String
+						default = "exclude"
+					"--target-peak-max"
+						arg_type = Float64
+					"--target-surge-max"
+						arg_type = Float64
+					"--target-surge-time"
+						arg_type = Int
+						default = 21
+					"--target-slope-max"
+						arg_type = Float64
+					"--target-prev-max"
+						arg_type = Float64
+					"--target-K-max"
+						arg_type = Float64
+				end
+
+				p = parse_args(args[2:end], s)
+				if p === nothing; return nothing; end
+
+				#	Validate the string options before any work
+					if !isfile(p["graphml"])
+						throw(ArgumentError("GraphML path not found: $(p["graphml"])"))
+					end
+					if !isfile(p["params"])
+						throw(ArgumentError("parameter file not found: $(p["params"])"))
+					end
+					if !(p["transmission"] in ("weighted", "simple"))
+						throw(ArgumentError("--transmission must be weighted or simple"))
+					end
+					if !(p["seed-mode"] in ("random", "file"))
+						throw(ArgumentError("--seed-mode must be random or file"))
+					end
+					if !(p["extinct-policy"] in ("exclude", "success", "failure"))
+						throw(ArgumentError("--extinct-policy must be exclude, success, or failure"))
+					end
+
+				#	Target region from the optional bounds
+					region = TargetRegion(I_peak_max = p["target-peak-max"], I_surge_max = p["target-surge-max"],
+										  surge_time = p["target-surge-time"], S_max = p["target-slope-max"],
+										  P_max_thresh = p["target-prev-max"], K_max = p["target-K-max"])
+
+				#	Run the batch
+					res = run_sbi_batch(p["graphml"], p["params"], p["out"];
+										village = p["village"],
+										region = region,
+										maxtime = p["max-time"],
+										transmission_method = Symbol(p["transmission"]),
+										seed_mode = Symbol(p["seed-mode"]),
+										master_seed = p["seed"],
+										seed_file = p["seed-file"],
+										n_seed_nodes = p["n-seed-nodes"],
+										replicates = p["replicates"],
+										extinct_policy = Symbol(p["extinct-policy"]))
+
+				#	Report
+					classes = join(["$(k)=$(v)" for (k, v) in sort(collect(res.class_counts))], ", ")
+					println("Batch written: $(res.n_runs) runs on $(Threads.nthreads()) threads ($(classes))")
+					println("  Records:  $(res.out_file)")
+					println("  Manifest: $(res.manifest_file)")
+				return nothing
+			end
+
 		#	Fallback: unknown mode
-			error("Unknown mode: $mode. Use 'single', 'sweep', or 'multi'.")
+			error("Unknown mode: $mode. Use 'single', 'sweep', 'multi', or 'sbi_batch'.")
 	end
 
 end # module
