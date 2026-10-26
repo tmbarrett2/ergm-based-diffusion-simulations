@@ -6,6 +6,9 @@
 #per run (schema version 3) with a manifest of the batch settings. This is the
 #interface to the Python layer; the single, sweep, and multi CLI modes, which write
 #full trajectories as CSV, are unchanged.
+#Revised 26 October 2026: sas_transformation option, so that batches can use the
+#SAS-preprocessed network (symmetrized, with common-third ties) as the validated
+#replication did.
 
 #   Modules
 	using .richards_model
@@ -551,6 +554,7 @@
 #	Run a Batch of Parameter Draws
 	function run_sbi_batch(graphml_file::String, params_file::String, out_file::String;
 						   village::String,
+						   sas_transformation::Bool=false,
 						   region::TargetRegion=TargetRegion(),
 						   maxtime::Int=200,
 						   transmission_method::Symbol=:weighted,
@@ -568,6 +572,7 @@
 			params_file::String: JSON array of parameter draws (read_draws)
 			out_file::String: JSONL output, one line per run
 			village::String: village identifier for the records and manifest
+			sas_transformation::Bool: load the network with SAS preprocessing (default = false)
 			region::TargetRegion: acceptable outcome region (default = unconstrained)
 			maxtime::Int: simulation horizon in days (default = 200)
 			transmission_method::Symbol: :weighted or :simple (default = :weighted)
@@ -589,6 +594,12 @@
 			output therefore does not depend on the thread count. BLAS is
 			held to one thread during the batch so that the curve fits do
 			not oversubscribe the CPU; the previous setting is restored.
+			sas_transformation passes through to sim_prep. The SAS form
+			symmetrizes the network and adds common-third ties with
+			square-root weights, and it keeps only nodes that appear in an
+			edge, so isolated nodes drop out and N, C0, and the eligible
+			seeds follow the transformed network. The manifest records the
+			choice, and a replay must load the network the same way.
 		"""
 
 		#	Validation of the settings
@@ -609,7 +620,7 @@
 			end
 
 		#	Network, eligible seeds, and draws
-			network = sim_prep(graphml_file)
+			network = sim_prep(graphml_file; sas_transformation=sas_transformation)
 			alst = network.alst
 			vlst = network.vlst
 			n_nodes = size(alst, 1)
@@ -676,7 +687,7 @@
 
 		#	Write the manifest
 			manifest = (schema_version = SBI_SCHEMA_VERSION, village = village, graphml = graphml_file,
-						n_nodes = n_nodes, maxtime = maxtime, transmission = String(transmission_method),
+						sas_transformation = sas_transformation, n_nodes = n_nodes, maxtime = maxtime, transmission = String(transmission_method),
 						seed_mode = String(seed_mode), master_seed = master_seed, seed_file = seed_file,
 						n_seed_nodes = n_seed_nodes, replicates = replicates, n_draws = length(draws),
 						n_runs = length(tasks), extinct_policy = String(extinct_policy),
@@ -709,7 +720,7 @@
 
 	**Usage**
 	```julia
-	run_sbi_batch(graphml_file, params_file, out_file; village,
+	run_sbi_batch(graphml_file, params_file, out_file; village, sas_transformation=false,
 				  region=TargetRegion(), maxtime=200, transmission_method=:weighted,
 				  seed_mode=:random, master_seed=nothing, seed_file=nothing,
 				  n_seed_nodes=1, replicates=1, extinct_policy=:exclude,
@@ -719,6 +730,7 @@
 	**Arguments**
 	- `graphml_file`, `params_file`, `out_file`: Network, parameter draws (JSON array), and JSONL output.
 	- `village::String`: Identifier written to every record and the manifest.
+	- `sas_transformation::Bool`: Load the network with SAS preprocessing, as the validated replication did (default `false`). Isolated nodes drop out of the transformed network.
 	- `region::TargetRegion`: The acceptable outcome region.
 	- `seed_mode`: `:random` derives each run's seeds from `master_seed`; `:file` reads them from `seed_file` (testing mode).
 	- `n_seed_nodes`: Seed nodes per run, drawn from nodes with at least one tie.

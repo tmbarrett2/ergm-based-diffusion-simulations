@@ -577,6 +577,8 @@ using ..diffusion_sim.richards_model: TargetRegion
 					"--village"
 						arg_type = String
 						required = true
+					"--sas-transformation"
+						action = :store_true
 					"--params"
 						arg_type = String
 						required = true
@@ -648,6 +650,7 @@ using ..diffusion_sim.richards_model: TargetRegion
 				#	Run the batch
 					res = run_sbi_batch(p["graphml"], p["params"], p["out"];
 										village = p["village"],
+										sas_transformation = p["sas-transformation"],
 										region = region,
 										maxtime = p["max-time"],
 										transmission_method = Symbol(p["transmission"]),
